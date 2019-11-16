@@ -72,7 +72,7 @@ class Bitset(val length: Int) {
      */
     fun firstSetBit(start: Int): Int {
         val head = start.head()
-        val firstWordRemaining = bits[head] shr start.tail()
+        val firstWordRemaining = bits[head] ushr start.tail()
         if (firstWordRemaining != NON_BIT_WORD) {
             return start + firstWordRemaining.countTrailingZeroBits()
         } else {

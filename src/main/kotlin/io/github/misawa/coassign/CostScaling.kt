@@ -1,5 +1,6 @@
 package io.github.misawa.coassign
 
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 private typealias Node = Int
@@ -52,17 +53,44 @@ class CostScaling(
         }
     }
 
-    private fun run() {
+    private fun run(): LargeWeight {
         check(lSize > 0 && rSize > 0)
 
         epsilon = weights.max() ?: 1
         potential.fill(0)
         start()
-        val pot = potential.map { (it.toDouble() / initialScale).roundToInt() }
-        println(pot)
-        for (e in 0 until numE) {
-            println("${used[e]} : ${graph.weights[e] - pot[sources[e]] + pot[targets[e]]}")
+        val pot = WeightArray(numV) { (potential[it].toDouble() / initialScale).roundToInt() }
+//        println(pot.joinToString(", "))
+//        for (e in 0 until numE) {
+//            println("${used[e]} : ${graph.weights[e] - pot[sources[e]] + pot[targets[e]]}")
+//        }
+
+        // Check primal feasibility
+        excess.fill(0)
+        for (e in 0 until edgeStarts[lSize]) if (used[e] == 1) {
+            ++excess[sources[e]]
+            ++excess[targets[e]]
         }
+        for (u in 0 until numV) check(excess[u] <= graph.multiplicities[u]) { "The matching includes too many edges adjacent to $u" }
+
+        // Check dual feasibility
+        for (e in 0 until edgeStarts[lSize]) {
+            val rWeight = graph.weights[e] - pot[sources[e]] + pot[targets[e]]
+            if (rWeight > 0) check(used[e] == 1) { "There's an edge that has positive residual weight but not used" }
+            if (rWeight < 0) check(used[e] == 0) { "There's an edge that has negative residual weight but used" }
+        }
+
+        // Extract primal result
+        var result: LargeWeight = 0
+        for (e in 0 until edgeStarts[lSize]) if (used[e] == 1) result += graph.weights[e]
+
+        // Extract dual value
+        var dual: LargeWeight = 0
+        for (u in 0 until lSize) dual += graph.multiplicities[u] * pot[u].toLargeWeight()
+        for (u in lSize until numV) dual -= graph.multiplicities[u] * pot[u].toLargeWeight()
+        for (e in 0 until edgeStarts[lSize]) dual += max(0, graph.weights[e] - pot[sources[e]] + pot[targets[e]])
+        check(result == dual) { "Primal and dual value should be the same. Primal: $result, dual: $dual" }
+        return result
     }
 
     private fun initPhase() {
@@ -105,7 +133,6 @@ class CostScaling(
         do {
             epsilon = (epsilon + params.scalingFactor - 1) / params.scalingFactor
             initPhase()
-            println("Epsilon: $epsilon")
             var cont = true
             while (cont) {
                 cont = false
@@ -136,7 +163,7 @@ class CostScaling(
                         potential[u] += epsilon
                     }
                 }
-                println(potential.joinToString(separator = ", "))
+//                println(potential.joinToString(", "))
             }
         } while (epsilon > 1)
     }
