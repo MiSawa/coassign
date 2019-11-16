@@ -1,8 +1,14 @@
-plugins {
-    id("org.jetbrains.kotlin.jvm") version "1.3.41"
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
-    // Apply the java-library plugin for API and implementation separation.
+plugins {
+    kotlin("jvm")
     `java-library`
+}
+
+apply(from = "properties.gradle.kts")
+
+tasks.withType<KotlinCompile> {
+    kotlinOptions.jvmTarget = ext["jvmTarget"] as String
 }
 
 repositories {
@@ -12,6 +18,7 @@ repositories {
 dependencies {
     implementation(platform("org.jetbrains.kotlin:kotlin-bom"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+    implementation("it.unimi.dsi:fastutil:8.3.0")
 
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
