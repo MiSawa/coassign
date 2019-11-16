@@ -47,7 +47,7 @@ class BipartiteGraph(builder: Builder) {
             reverse[forward] = backward
             reverse[backward] = forward
             weights[forward] = builder.weights[e]
-            weights[backward] = builder.weights[e]
+            weights[backward] = -builder.weights[e]
         }
         multiplicities = FlowArray(numV) {
             if (it < lSize) builder.multiplicityL[it]

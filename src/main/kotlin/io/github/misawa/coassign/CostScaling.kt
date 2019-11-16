@@ -1,6 +1,5 @@
 package io.github.misawa.coassign
 
-import kotlin.math.max
 import kotlin.math.roundToInt
 
 private typealias Node = Int
@@ -23,13 +22,20 @@ class CostScaling(
     private val reverse: IntArray = graph.reverse
     private val weights: LargeWeightArray =
         LargeWeightArray(graph.weights.size) { initialScale * graph.weights[it].toLargeWeight() }
-    private val multiplicities: IntArray = graph.multiplicities
+
+    private val minExcess: IntArray = IntArray(numV) { u ->
+        if (u < lSize) -graph.multiplicities[u]
+        else 0
+    }
+    private val maxExcess: IntArray = IntArray(numV) { u ->
+        if (u < lSize) 0
+        else graph.multiplicities[u]
+    }
 
     private var epsilon: LargeWeight = 0
     private val potential: LargeWeightArray = LargeWeightArray(numV)
-    private val numMatch: IntArray = IntArray(numV)
-    private val inMatch: IntArray = IntArray(numE)
-    //    private val residualEdge = Bitset(numE)
+    private val excess: IntArray = IntArray(numV)
+    private val used: IntArray = IntArray(numE)
     private val currentEdge: IntArray = IntArray(numV + 1)
 
     companion object {
@@ -39,51 +45,43 @@ class CostScaling(
     }
 
     data class Params(
-        val scalingFactor: Weight = 10,
-        val maxPartialPathLength: Int = 4,
-        val priceRefinementLimit: Int = 2,
-        val globalUpdateFactor: Double = 1.0
-    )
+        val scalingFactor: Weight = 2
+    ) {
+        init {
+            check(scalingFactor > 1) { "Scaling factor should be greater than 1 but was $scalingFactor" }
+        }
+    }
 
     private fun run() {
         check(lSize > 0 && rSize > 0)
 
         epsilon = weights.max() ?: 1
         potential.fill(0)
-//        residualEdge.setRange(0, edgeStarts[lSize])
         start()
         val pot = potential.map { (it.toDouble() / initialScale).roundToInt() }
         println(pot)
         for (e in 0 until numE) {
-            println("${inMatch[e]} : ${graph.weights[e] - pot[sources[e]] - pot[targets[e]]}")
+            println("${used[e]} : ${graph.weights[e] - pot[sources[e]] + pot[targets[e]]}")
         }
     }
-
-    /*
-    private inline fun iterateResidualEdge(u: Node, handler: (Edge) -> Unit) {
-        val edgeEnd = edgeStarts[u + 1]
-        var e = residualEdge.firstSetBitInRange(edgeStarts[u], edgeEnd)
-        while (e != -1) {
-            handler.invoke(e)
-            e = residualEdge.firstSetBitInRange(e + 1, edgeEnd)
-        }
-    }
-    */
 
     private fun initPhase() {
         edgeStarts.copyInto(currentEdge)
-        numMatch.fill(0)
-        inMatch.fill(0)
+        used.fill(0, fromIndex = 0, toIndex = edgeStarts[lSize])
+        used.fill(1, fromIndex = edgeStarts[lSize], toIndex = numE)
+        excess.fill(0)
 
         // Saturate arcs that breaks 0-optimality to make the pseudo assignment 0-optimal
-        for (u in 0 until numV) {
-            val potentialU = potential[u];
+        for (u in 0 until lSize) {
+            val potentialU = potential[u]
             for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                 val v = targets[e]
                 val rWeight = weights[e] - potentialU - potential[v]
                 if (rWeight > 0) {
-                    inMatch[e] = 1
-                    ++numMatch[v]
+                    used[e] = 1
+                    used[reverse[e]] = 0
+                    --excess[u]
+                    ++excess[v]
                 }
             }
         }
@@ -93,12 +91,13 @@ class CostScaling(
      * Negative return value means it's a deficit
      */
     private fun getExcess(u: Node): Int {
-        return if (potential[u] < -epsilon) { // target numMatch is 0
-            numMatch[u]
-        } else if (potential[u] > epsilon) { // target numMatch is the multiplicity
-            numMatch[u] - multiplicities[u]
-        } else { // target numMatch is just a nearest feasible one
-            max(0, numMatch[u] - multiplicities[u]) // excess or nothing
+        val p = potential[u]
+        return when {
+            p < -epsilon -> excess[u] - maxExcess[u]
+            p > epsilon -> excess[u] - minExcess[u]
+            excess[u] > maxExcess[u] -> excess[u] - maxExcess[u]
+            excess[u] < minExcess[u] -> excess[u] - minExcess[u]
+            else -> 0
         }
     }
 
@@ -112,51 +111,29 @@ class CostScaling(
                 cont = false
                 var changed = false
                 for (u in 0 until numV) {
-                    var excess = getExcess(u)
-                    if (excess == 0) continue
-                    cont = true
+                    var currentExcess = getExcess(u)
+                    if (currentExcess != 0) cont = true
+                    if (currentExcess <= 0) continue
                     val potentialU = potential[u]
-                    if (u < lSize && excess < 0){
-                        for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                            if (inMatch[e] == 1) continue
-                            val v = targets[e]
-                            val rWeight = weights[e] - potentialU - potential[v]
-                            if (rWeight <= 0) continue
-                            val re = reverse[e]
-                            inMatch[e] = 1
-                            inMatch[re] = 1
-                            ++numMatch[u]
-                            ++numMatch[v]
-                            ++excess
-                            if (excess == 0) break
-                        }
-                        if (excess < 0) potential[u] -= epsilon
-                        changed = true
-                    } else if (u >= lSize && excess > 0) {
-                        for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                            if (inMatch[e] == 0) continue
-                            val v = targets[e]
-                            val rWeight = weights[e] - potentialU - potential[v]
-                            if (rWeight >= 0) continue
-                            val re = reverse[e]
-                            inMatch[e] = 0
-                            inMatch[re] = 0
-                            --numMatch[u]
-                            --numMatch[v]
-                            --excess
-                            if (excess == 0) break
-                        }
-                        if (excess > 0) potential[u] += epsilon
-                        changed = true
+                    for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                        if (used[e] == 1) continue
+                        val v = targets[e]
+                        val rWeight = weights[e] - potentialU + potential[v]
+                        if (rWeight <= 0) continue
+                        val re = reverse[e]
+                        used[e] = 1
+                        used[re] = 0
+                        --this.excess[u]
+                        ++this.excess[v]
+                        --currentExcess
+                        if (currentExcess == 0) break
                     }
+                    if (currentExcess > 0) potential[u] -= epsilon
+                    changed = true
                 }
                 if (cont && !changed) {
                     for (u in 0 until numV) {
-                        if (u < lSize) {
-                            potential[u] += epsilon
-                        } else {
-                            potential[u] -= epsilon
-                        }
+                        potential[u] += epsilon
                     }
                 }
                 println(potential.joinToString(separator = ", "))
