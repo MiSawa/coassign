@@ -1,7 +1,7 @@
 package io.github.misawa.coassign
 
 fun main(args: Array<String>) {
-    val graph = BipartiteGraph.builder(4, 2)
+    val graph = BipartiteGraph.builder(3, 2)
         .addEdge(0, 0, 3)
         .addEdge(0, 1, 1)
         .addEdge(1, 0, 3)

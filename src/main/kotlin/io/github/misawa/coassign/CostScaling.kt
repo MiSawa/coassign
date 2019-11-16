@@ -1,6 +1,7 @@
 package io.github.misawa.coassign
 
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 private typealias Node = Int
 private typealias Edge = Int
@@ -38,7 +39,7 @@ class CostScaling(
     }
 
     data class Params(
-        val scalingFactor: Weight = 2,
+        val scalingFactor: Weight = 10,
         val maxPartialPathLength: Int = 4,
         val priceRefinementLimit: Int = 2,
         val globalUpdateFactor: Double = 1.0
@@ -51,6 +52,11 @@ class CostScaling(
         potential.fill(0)
 //        residualEdge.setRange(0, edgeStarts[lSize])
         start()
+        val pot = potential.map { (it.toDouble() / initialScale).roundToInt() }
+        println(pot)
+        for (e in 0 until numE) {
+            println("${inMatch[e]} : ${graph.weights[e] - pot[sources[e]] - pot[targets[e]]}")
+        }
     }
 
     /*
@@ -104,27 +110,13 @@ class CostScaling(
             var cont = true
             while (cont) {
                 cont = false
+                var changed = false
                 for (u in 0 until numV) {
                     var excess = getExcess(u)
                     if (excess == 0) continue
                     cont = true
                     val potentialU = potential[u]
-                    if (excess > 0) {
-                        for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                            if (inMatch[e] == 0) continue
-                            val v = targets[e]
-                            val rWeight = weights[e] - potentialU - potential[v]
-                            if (rWeight >= 0) continue
-                            val re = reverse[e]
-                            inMatch[e] = 0
-                            inMatch[re] = 0
-                            --numMatch[u]
-                            --numMatch[v]
-                            --excess
-                            if (excess == 0) break
-                        }
-                        if (excess > 0) potential[u] += epsilon
-                    } else {
+                    if (u < lSize && excess < 0){
                         for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                             if (inMatch[e] == 1) continue
                             val v = targets[e]
@@ -139,6 +131,32 @@ class CostScaling(
                             if (excess == 0) break
                         }
                         if (excess < 0) potential[u] -= epsilon
+                        changed = true
+                    } else if (u >= lSize && excess > 0) {
+                        for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                            if (inMatch[e] == 0) continue
+                            val v = targets[e]
+                            val rWeight = weights[e] - potentialU - potential[v]
+                            if (rWeight >= 0) continue
+                            val re = reverse[e]
+                            inMatch[e] = 0
+                            inMatch[re] = 0
+                            --numMatch[u]
+                            --numMatch[v]
+                            --excess
+                            if (excess == 0) break
+                        }
+                        if (excess > 0) potential[u] += epsilon
+                        changed = true
+                    }
+                }
+                if (cont && !changed) {
+                    for (u in 0 until numV) {
+                        if (u < lSize) {
+                            potential[u] += epsilon
+                        } else {
+                            potential[u] -= epsilon
+                        }
                     }
                 }
                 println(potential.joinToString(separator = ", "))
