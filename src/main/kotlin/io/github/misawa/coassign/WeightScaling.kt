@@ -8,8 +8,8 @@ private typealias Edge = Int
 
 //@ExperimentalStdlibApi
 class WeightScaling(
-    private val params: Params,
-    private val graph: BipartiteGraph
+    private val graph: BipartiteGraph,
+    private val params: Params
 ) {
     private val initialScale = (graph.numV + 2) * params.scalingFactor
     private val numV: Int = graph.numV
@@ -40,8 +40,8 @@ class WeightScaling(
     private val currentEdge: IntArray = IntArray(numV + 1)
 
     companion object {
-        fun run(params: Params, graph: BipartiteGraph) {
-            WeightScaling(params, graph).run()
+        fun run(graph: BipartiteGraph, params: Params = Params()) {
+            WeightScaling(graph, params).run()
         }
     }
 
