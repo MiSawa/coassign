@@ -2,31 +2,42 @@ package io.github.misawa.coassign
 
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
-import kotlin.random.Random
 
 internal class WeightScalingTest {
     companion object {
         private const val NUM_INSTANCES: Int = 10000
         private const val SEED: Int = 42
-        private val PARAMETER: RandomGraph.Parameter = RandomGraph.Parameter(
-            lSize = 1 until 20,
-            rSize = 1 until 20,
-            lMultiplicity = 1 until 11,
-            rMultiplicity = 1 until 11,
-            weight = 2 until 20,
-            density = 0.6
+        private val SMALL: RandomGraph.Parameter = RandomGraph.Parameter(
+            lSize = 1 until 4,
+            rSize = 1 until 4,
+            lMultiplicity = 1 until 5,
+            rMultiplicity = 1 until 5,
+            weight = 1 until 5,
+            density = 0.5
         )
+        private val MEDIUM: RandomGraph.Parameter = RandomGraph.Parameter(
+            lSize = 1 until 50,
+            rSize = 1 until 50,
+            lMultiplicity = 1 until 10,
+            rMultiplicity = 1 until 10,
+            weight = 2 until 100,
+            density = 0.5
+        )
+
+        private fun gen(param: RandomGraph.Parameter) =
+            (0 until NUM_INSTANCES).map { RandomGraph.generate(param, it.toLong()) }
 
         @Suppress("unused")
         @JvmStatic
         fun generateRandomBipartiteGraph(): List<BipartiteGraph> {
-            val rng = Random(SEED)
-            return (0 until NUM_INSTANCES).map {
-                RandomGraph.generate(
-                    parameter = PARAMETER,
-                    seed = rng.nextLong()
-                )
-            }
+            return listOf(
+                gen(SMALL.copy(density = 0.1, lMultiplicity = 0 until 3, rMultiplicity = 0 until 3)),
+                gen(SMALL.copy(density = 0.5)),
+                gen(SMALL.copy(density = 1.0)),
+                gen(MEDIUM.copy(density = 0.1)),
+                gen(MEDIUM.copy(density = 0.5)),
+                gen(MEDIUM.copy(density = 1.0))
+            ).flatten()
         }
     }
 

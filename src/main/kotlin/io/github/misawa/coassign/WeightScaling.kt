@@ -11,7 +11,7 @@ class WeightScaling(
     private val graph: BipartiteGraph,
     private val params: Params
 ) {
-    private val initialScale = (graph.numV + 2) * params.scalingFactor
+    private val initialScale = (graph.lSize + 2) * params.scalingFactor
     private val numV: Int = graph.numV
     private val numE: Int = graph.numE
     private val lSize: Int = graph.lSize
