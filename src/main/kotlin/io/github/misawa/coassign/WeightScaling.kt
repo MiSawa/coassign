@@ -2,7 +2,6 @@ package io.github.misawa.coassign
 
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 private typealias Node = Int
 private typealias Edge = Int
@@ -24,6 +23,12 @@ class WeightScaling(
     private val reverse: IntArray = graph.reverse
     private val weights: LargeWeightArray =
         LargeWeightArray(graph.weights.size) { initialScale * graph.weights[it].toLargeWeight() }
+
+    private val nodes: IntRange = 0 until numV
+    private val leftNodes: IntRange = 0 until lSize
+    private val rightNodes: IntRange = lSize until numV
+    private val edges: IntRange = 0 until numE
+    private val forwardEdges: IntRange = 0 until edgeStarts[lSize]
 
     private val minExcess: IntArray = IntArray(numV) { u ->
         if (u < lSize) -graph.multiplicities[u]
@@ -54,6 +59,8 @@ class WeightScaling(
         }
     }
 
+    private fun sgn(u: Node): Int = if (u < lSize) 1 else -1
+
     private fun run(): LargeWeight {
         check(lSize > 0 && rSize > 0)
 
@@ -63,14 +70,13 @@ class WeightScaling(
 
         fun getDualValue(pot: WeightArray): LargeWeight {
             var dual: LargeWeight = 0
-            for (u in 0 until lSize) dual += graph.multiplicities[u] * max(0, pot[u]).toLargeWeight()
-            for (u in lSize until numV) dual += graph.multiplicities[u] * max(0, -pot[u]).toLargeWeight()
-            for (e in 0 until edgeStarts[lSize]) dual += max(0, graph.weights[e] - pot[sources[e]] + pot[targets[e]])
+            for (u in nodes) dual += graph.multiplicities[u] * max(0, sgn(u) * pot[u]).toLargeWeight()
+            for (e in forwardEdges) dual += max(0, graph.weights[e] - pot[sources[e]] + pot[targets[e]])
             return dual
         }
 
         fun checkDualFeasibility(pot: WeightArray) {
-            for (e in 0 until edgeStarts[lSize]) {
+            for (e in edges) {
                 val rWeight = graph.weights[e] - pot[sources[e]] + pot[targets[e]]
                 if (rWeight > 0) check(used[e]) { "There's an edge that has positive residual weight but not used" }
                 if (rWeight < 0) check(!used[e]) { "There's an edge that has negative residual weight but used" }
@@ -80,19 +86,19 @@ class WeightScaling(
         // --- Work for primal ---
         // Check primal feasibility
         val matchCount = IntArray(numV)
-        for (e in 0 until edgeStarts[lSize]) if (used[e]) {
+        for (e in forwardEdges) if (used[e]) {
             ++matchCount[sources[e]]
             ++matchCount[targets[e]]
         }
-        for (u in 0 until numV) check(matchCount[u] <= graph.multiplicities[u]) { "The matching includes too many edges adjacent to $u" }
+        for (u in nodes) check(matchCount[u] <= graph.multiplicities[u]) { "The matching includes too many edges adjacent to $u" }
 
         // Extract primal value
         var result: LargeWeight = 0
-        for (e in 0 until edgeStarts[lSize]) if (used[e]) result += graph.weights[e]
+        for (e in forwardEdges) if (used[e]) result += graph.weights[e]
 
         // --- Work for dual ---
         // Round potential FIXME: Don't need this.
-        for (i in 0 until numV) {
+        for (i in nodes) {
             potential[i] = (potential[i].toReal() / initialScale).roundToLargeWeight() * initialScale
         }
 
@@ -102,16 +108,16 @@ class WeightScaling(
         // Tighten dual variables
         run {
             var offset: Weight = 0
-            for (ignored in 0 until numV) {
-                for (u in 0 until lSize) {
+            for (ignored in nodes) {
+                for (u in leftNodes) {
                     if (matchCount[u] < graph.multiplicities[u]) pot[u] = min(pot[u], offset)
                     if (matchCount[u] > 0) offset = min(offset, pot[u])
                 }
-                for (u in lSize until numV) {
+                for (u in rightNodes) {
                     if (matchCount[u] > 0) pot[u] = min(pot[u], offset)
                     if (matchCount[u] < graph.multiplicities[u]) offset = min(offset, pot[u])
                 }
-                for (e in 0 until numE) {
+                for (e in edges) {
                     if (!used[e]) {
                         val u = sources[e]
                         val v = targets[e]
@@ -119,7 +125,7 @@ class WeightScaling(
                     }
                 }
             }
-            for (u in 0 until numV) pot[u] -= offset
+            for (u in nodes) pot[u] -= offset
         }
         checkDualFeasibility(pot)
         val dual = getDualValue(pot)
@@ -134,7 +140,7 @@ class WeightScaling(
         excess.fill(0)
 
         // Saturate arcs that breaks 0-optimality to make the pseudo assignment 0-optimal
-        for (u in 0 until lSize) {
+        for (u in leftNodes) {
             val potentialU = potential[u]
             for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                 val v = targets[e]
@@ -171,7 +177,7 @@ class WeightScaling(
             while (cont) {
                 cont = false
                 var changed = false
-                for (u in 0 until numV) {
+                for (u in nodes) {
                     var currentExcess = getExcess(u)
                     if (currentExcess != 0) cont = true
                     if (currentExcess <= 0) continue
