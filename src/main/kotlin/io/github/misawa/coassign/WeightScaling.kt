@@ -109,13 +109,9 @@ class WeightScaling(
         run {
             var offset: Weight = 0
             for (ignored in nodes) {
-                for (u in leftNodes) {
-                    if (matchCount[u] < graph.multiplicities[u]) pot[u] = min(pot[u], offset)
-                    if (matchCount[u] > 0) offset = min(offset, pot[u])
-                }
-                for (u in rightNodes) {
-                    if (matchCount[u] > 0) pot[u] = min(pot[u], offset)
-                    if (matchCount[u] < graph.multiplicities[u]) offset = min(offset, pot[u])
+                for (u in nodes) {
+                    if (excess[u] > minExcess[u]) pot[u] = min(pot[u], offset)
+                    if (excess[u] < maxExcess[u]) offset = min(offset, pot[u])
                 }
                 for (e in edges) {
                     if (!used[e]) {
@@ -199,7 +195,7 @@ class WeightScaling(
                     changed = true
                 }
                 if (cont && !changed) {
-                    for (u in 0 until numV) {
+                    for (u in nodes) {
                         potential[u] += epsilon
                     }
                 }
