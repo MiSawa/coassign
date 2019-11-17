@@ -6,14 +6,14 @@ import kotlin.random.Random
 
 internal class WeightScalingTest {
     companion object {
-        private const val NUM_INSTANCES: Int = 10
+        private const val NUM_INSTANCES: Int = 10000
         private const val SEED: Int = 42
         private val PARAMETER: RandomGraph.Parameter = RandomGraph.Parameter(
-            lSize = 1 until 10,
-            rSize = 1 until 10,
-            lMultiplicity = 1 until 3,
-            rMultiplicity = 1 until 2,
-            weight = 2 until 10,
+            lSize = 1 until 20,
+            rSize = 1 until 20,
+            lMultiplicity = 1 until 11,
+            rMultiplicity = 1 until 11,
+            weight = 2 until 20,
             density = 0.6
         )
 

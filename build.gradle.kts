@@ -26,10 +26,10 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
-//    systemProperties = mapOf(
-//        "junit.jupiter.execution.parallel.enabled" to true,
-//        "junit.jupiter.execution.parallel.mode.default" to "concurrent"
-//    )
+    systemProperties = mapOf(
+        "junit.jupiter.execution.parallel.enabled" to true,
+        "junit.jupiter.execution.parallel.mode.default" to "concurrent"
+    )
     testLogging {
         events = setOf(TestLogEvent.SKIPPED, TestLogEvent.FAILED)
     }
