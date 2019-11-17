@@ -36,7 +36,7 @@ class CostScaling(
     private var epsilon: LargeWeight = 0
     private val potential: LargeWeightArray = LargeWeightArray(numV)
     private val excess: IntArray = IntArray(numV)
-    private val used: IntArray = IntArray(numE)
+    private val used: BooleanArray = BooleanArray(numE)
     private val currentEdge: IntArray = IntArray(numV + 1)
 
     companion object {
@@ -67,7 +67,7 @@ class CostScaling(
 
         // Check primal feasibility
         excess.fill(0)
-        for (e in 0 until edgeStarts[lSize]) if (used[e] == 1) {
+        for (e in 0 until edgeStarts[lSize]) if (used[e]) {
             ++excess[sources[e]]
             ++excess[targets[e]]
         }
@@ -76,13 +76,13 @@ class CostScaling(
         // Check dual feasibility
         for (e in 0 until edgeStarts[lSize]) {
             val rWeight = graph.weights[e] - pot[sources[e]] + pot[targets[e]]
-            if (rWeight > 0) check(used[e] == 1) { "There's an edge that has positive residual weight but not used" }
-            if (rWeight < 0) check(used[e] == 0) { "There's an edge that has negative residual weight but used" }
+            if (rWeight > 0) check(used[e]) { "There's an edge that has positive residual weight but not used" }
+            if (rWeight < 0) check(!used[e]) { "There's an edge that has negative residual weight but used" }
         }
 
         // Extract primal result
         var result: LargeWeight = 0
-        for (e in 0 until edgeStarts[lSize]) if (used[e] == 1) result += graph.weights[e]
+        for (e in 0 until edgeStarts[lSize]) if (used[e]) result += graph.weights[e]
 
         // Extract dual value
         var dual: LargeWeight = 0
@@ -95,8 +95,8 @@ class CostScaling(
 
     private fun initPhase() {
         edgeStarts.copyInto(currentEdge)
-        used.fill(0, fromIndex = 0, toIndex = edgeStarts[lSize])
-        used.fill(1, fromIndex = edgeStarts[lSize], toIndex = numE)
+        used.fill(false, fromIndex = 0, toIndex = edgeStarts[lSize])
+        used.fill(true, fromIndex = edgeStarts[lSize], toIndex = numE)
         excess.fill(0)
 
         // Saturate arcs that breaks 0-optimality to make the pseudo assignment 0-optimal
@@ -106,8 +106,8 @@ class CostScaling(
                 val v = targets[e]
                 val rWeight = weights[e] - potentialU - potential[v]
                 if (rWeight > 0) {
-                    used[e] = 1
-                    used[reverse[e]] = 0
+                    used[e] = true
+                    used[reverse[e]] = false
                     --excess[u]
                     ++excess[v]
                 }
@@ -143,13 +143,13 @@ class CostScaling(
                     if (currentExcess <= 0) continue
                     val potentialU = potential[u]
                     for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                        if (used[e] == 1) continue
+                        if (used[e]) continue
                         val v = targets[e]
                         val rWeight = weights[e] - potentialU + potential[v]
                         if (rWeight <= 0) continue
                         val re = reverse[e]
-                        used[e] = 1
-                        used[re] = 0
+                        used[e] = true
+                        used[re] = false
                         --this.excess[u]
                         ++this.excess[v]
                         --currentExcess
