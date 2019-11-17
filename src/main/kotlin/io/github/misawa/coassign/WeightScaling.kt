@@ -7,7 +7,7 @@ private typealias Node = Int
 private typealias Edge = Int
 
 //@ExperimentalStdlibApi
-class CostScaling(
+class WeightScaling(
     private val params: Params,
     private val graph: BipartiteGraph
 ) {
@@ -41,7 +41,7 @@ class CostScaling(
 
     companion object {
         fun run(params: Params, graph: BipartiteGraph) {
-            CostScaling(params, graph).run()
+            WeightScaling(params, graph).run()
         }
     }
 
