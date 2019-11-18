@@ -30,14 +30,16 @@ class WeightScaling(
     private val edges: IntRange = 0 until numE
     private val forwardEdges: IntRange = 0 until edgeStarts[lSize]
 
-    private val minExcess: IntArray = IntArray(numV) { u ->
+    private val minExcessOrig: IntArray = IntArray(numV) { u ->
         if (u < lSize) -graph.multiplicities[u]
         else 0
     }
-    private val maxExcess: IntArray = IntArray(numV) { u ->
+    private val maxExcessOrig: IntArray = IntArray(numV) { u ->
         if (u < lSize) 0
         else graph.multiplicities[u]
     }
+    private val minExcess: IntArray = minExcessOrig.copyOf()
+    private val maxExcess: IntArray = maxExcessOrig.copyOf()
 
     private var epsilon: LargeWeight = 0
     private val potential: LargeWeightArray = LargeWeightArray(numV)
@@ -110,8 +112,8 @@ class WeightScaling(
             var offset: Weight = 0
             for (ignored in nodes) {
                 for (u in nodes) {
-                    if (excess[u] > minExcess[u]) pot[u] = min(pot[u], offset)
-                    if (excess[u] < maxExcess[u]) offset = min(offset, pot[u])
+                    if (excess[u] > minExcessOrig[u]) pot[u] = min(pot[u], offset)
+                    if (excess[u] < maxExcessOrig[u]) offset = min(offset, pot[u])
                 }
                 for (e in edges) {
                     if (!used[e]) {
@@ -149,6 +151,26 @@ class WeightScaling(
                 }
             }
         }
+        for (u in nodes) {
+            reCalcExcess(u)
+        }
+    }
+
+    private fun reCalcExcess(u: Node, p: LargeWeight = potential[u]) {
+        when {
+            p < -epsilon -> {
+                maxExcess[u] = maxExcessOrig[u]
+                minExcess[u] = maxExcessOrig[u]
+            }
+            p > epsilon -> {
+                maxExcess[u] = minExcessOrig[u]
+                minExcess[u] = minExcessOrig[u]
+            }
+            else -> {
+                minExcess[u] = minExcessOrig[u]
+                maxExcess[u] = maxExcessOrig[u]
+            }
+        }
     }
 
     /**
@@ -157,49 +179,99 @@ class WeightScaling(
     private fun getExcess(u: Node): Int {
         val p = potential[u]
         return when {
-            p < -epsilon -> excess[u] - maxExcess[u]
-            p > epsilon -> excess[u] - minExcess[u]
-            excess[u] > maxExcess[u] -> excess[u] - maxExcess[u]
-            excess[u] < minExcess[u] -> excess[u] - minExcess[u]
+            p < -epsilon -> excess[u] - maxExcessOrig[u]
+            p > epsilon -> excess[u] - minExcessOrig[u]
+            excess[u] > maxExcessOrig[u] -> excess[u] - maxExcessOrig[u]
+            excess[u] < minExcessOrig[u] -> excess[u] - minExcessOrig[u]
             else -> 0
         }
+    }
+
+    private fun relabel(u: Node) {
+        potential[u] -= epsilon
+        reCalcExcess(u, potential[u])
+        currentEdge[u] = edgeStarts[u]
+    }
+
+    /**
+     * Returns true iff the current assignment is proper w.r.t. the potential
+     */
+    private fun dischargeRoot(): Boolean {
+        while (true) {
+            var hasDeficit = false
+            for (u in nodes) {
+                if (excess[u] > maxExcess[u]) return false
+                hasDeficit = hasDeficit || excess[u] < minExcess[u]
+            }
+            if (!hasDeficit) return true
+            for (u in nodes) {
+                potential[u] += epsilon
+                reCalcExcess(u, potential[u])
+            }
+        }
+    }
+
+    private fun discharge1(u: Node): Boolean {
+        var ex = excess[u] - maxExcess[u]
+        if (ex <= 0) return false
+        val p = potential[u]
+        var e = currentEdge[u]-1
+        while (++e < edgeStarts[u+1] && ex > 0) {
+            if (used[e]) continue
+            val v = targets[e]
+            val rWeight = weights[e] - p + potential[v]
+            if (rWeight <= 0) continue
+            val re = reverse[e]
+            used[e] = true
+            used[re] = false
+            --excess[u]
+            ++excess[v]
+            --ex
+        }
+        currentEdge[u] = e
+        if (ex > 0) relabel(u)
+        return excess[u] - maxExcess[u] > 0
+    }
+
+    private fun discharge2(u: Node): Boolean {
+        var ex = excess[u] - maxExcess[u]
+        if (ex <= 0) return false
+        val p = potential[u]
+        var e = currentEdge[u]-1
+        while (++e < edgeStarts[u+1] && ex > 0) {
+            if (used[e]) continue
+            val v = targets[e]
+            val rWeight = weights[e] - p + potential[v]
+            if (rWeight <= 0) continue
+            val re = reverse[e]
+            used[e] = true
+            used[re] = false
+            --excess[u]
+            ++excess[v]
+            --ex
+            if (discharge1(v) && discharge1(v)) {
+                ex = excess[u] - maxExcess[u]
+            }
+        }
+        currentEdge[u] = e
+        if (ex > 0) relabel(u)
+        return excess[u] - maxExcess[u] > 0
     }
 
     private fun start() {
         do {
             epsilon = (epsilon + params.scalingFactor - 1) / params.scalingFactor
             initPhase()
-            var cont = true
-            while (cont) {
-                cont = false
-                var changed = false
-                for (u in nodes) {
-                    var currentExcess = getExcess(u)
-                    if (currentExcess != 0) cont = true
-                    if (currentExcess <= 0) continue
-                    val potentialU = potential[u]
-                    for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                        if (used[e]) continue
-                        val v = targets[e]
-                        val rWeight = weights[e] - potentialU + potential[v]
-                        if (rWeight <= 0) continue
-                        val re = reverse[e]
-                        used[e] = true
-                        used[re] = false
-                        --this.excess[u]
-                        ++this.excess[v]
-                        --currentExcess
-                        if (currentExcess == 0) break
-                    }
-                    if (currentExcess > 0) potential[u] -= epsilon
-                    changed = true
-                }
-                if (cont && !changed) {
-                    for (u in nodes) {
-                        potential[u] += epsilon
+            while (true) {
+                if (dischargeRoot()) break
+                for (u in rightNodes) while (discharge1(u));
+                var cont = true
+                while (cont) {
+                    cont = false
+                    for (u in leftNodes) {
+                        cont = cont || discharge2(u)
                     }
                 }
-//                println(potential.joinToString(", "))
             }
         } while (epsilon > 1)
     }
