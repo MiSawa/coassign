@@ -48,9 +48,7 @@ class WeightScaling(
     private val currentEdge: IntArray = IntArray(numV + 1)
 
     companion object {
-        fun run(graph: BipartiteGraph, params: Params = Params()) {
-            WeightScaling(graph, params).run()
-        }
+        fun run(graph: BipartiteGraph, params: Params = Params()): LargeWeight = WeightScaling(graph, params).run()
     }
 
     data class Params(
