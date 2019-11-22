@@ -2,3 +2,4 @@
 .idea
 build
 coassign.iml
+local.settings.gradle.kts
