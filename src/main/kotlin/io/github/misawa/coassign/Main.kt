@@ -14,5 +14,5 @@ fun main(args: Array<String>) {
         .setMultiplicityRight(0, 2)
         .setMultiplicityRight(1, 1)
         .build()
-    WeightScaling.run(params = WeightScaling.Params(), graph = graph)
+    WeightScalingPR.run(params = WeightScalingPR.Params(), graph = graph)
 }

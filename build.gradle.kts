@@ -19,6 +19,8 @@ repositories {
 dependencies {
     implementation(platform("org.jetbrains.kotlin:kotlin-bom"))
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
+
+    implementation("io.github.microutils:kotlin-logging:1.7.7")
     implementation("it.unimi.dsi:fastutil:8.3.0")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.4.0")

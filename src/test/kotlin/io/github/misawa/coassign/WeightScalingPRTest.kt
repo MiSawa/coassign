@@ -3,7 +3,7 @@ package io.github.misawa.coassign
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 
-internal class WeightScalingTest {
+internal class WeightScalingPRTest {
     companion object {
         private const val NUM_INSTANCES: Int = 10000
         private const val SEED: Int = 42
@@ -44,6 +44,6 @@ internal class WeightScalingTest {
     @ParameterizedTest
     @MethodSource("generateRandomBipartiteGraph")
     fun testRandomly(graph: BipartiteGraph) {
-        WeightScaling.run(graph)
+        WeightScalingPR.run(graph)
     }
 }

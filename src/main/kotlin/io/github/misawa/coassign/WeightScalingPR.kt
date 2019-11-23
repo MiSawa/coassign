@@ -1,13 +1,13 @@
 package io.github.misawa.coassign
 
+import mu.KLogging
 import kotlin.math.max
 import kotlin.math.min
 
 private typealias Node = Int
 private typealias Edge = Int
 
-//@ExperimentalStdlibApi
-class WeightScaling(
+class WeightScalingPR(
     private val graph: BipartiteGraph,
     private val params: Params
 ) {
@@ -47,8 +47,8 @@ class WeightScaling(
     private val used: BooleanArray = BooleanArray(numE)
     private val currentEdge: IntArray = IntArray(numV + 1)
 
-    companion object {
-        fun run(graph: BipartiteGraph, params: Params = Params()): LargeWeight = WeightScaling(graph, params).run()
+    companion object : KLogging() {
+        fun run(graph: BipartiteGraph, params: Params = Params()): LargeWeight = WeightScalingPR(graph, params).run()
     }
 
     data class Params(
@@ -213,8 +213,8 @@ class WeightScaling(
         var ex = excess[u] - maxExcess[u]
         if (ex <= 0) return false
         val p = potential[u]
-        var e = currentEdge[u]-1
-        while (++e < edgeStarts[u+1] && ex > 0) {
+        var e = currentEdge[u] - 1
+        while (++e < edgeStarts[u + 1] && ex > 0) {
             if (used[e]) continue
             val v = targets[e]
             val rWeight = weights[e] - p + potential[v]
@@ -235,8 +235,8 @@ class WeightScaling(
         var ex = excess[u] - maxExcess[u]
         if (ex <= 0) return false
         val p = potential[u]
-        var e = currentEdge[u]-1
-        while (++e < edgeStarts[u+1] && ex > 0) {
+        var e = currentEdge[u] - 1
+        while (++e < edgeStarts[u + 1] && ex > 0) {
             if (used[e]) continue
             val v = targets[e]
             val rWeight = weights[e] - p + potential[v]
@@ -259,6 +259,7 @@ class WeightScaling(
     private fun start() {
         do {
             epsilon = (epsilon + params.scalingFactor - 1) / params.scalingFactor
+            logger.trace { "Phase $epsilon" }
             initPhase()
             while (true) {
                 if (dischargeRoot()) break
