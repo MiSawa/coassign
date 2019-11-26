@@ -11,6 +11,9 @@ class BipartiteGraph(builder: Builder) {
     internal val numE: Int
     internal val lSize: Int
     internal val rSize: Int
+    internal val nodes: NodeRange
+    internal val edges: EdgeRange
+    internal val forwardEdges: EdgeRange
     internal val flipped: Boolean
     internal val edgeStarts: IntArray
     internal val sources: IntArray
@@ -26,6 +29,9 @@ class BipartiteGraph(builder: Builder) {
         numV = lSize + rSize
         val originalNumE = builder.weights.size
         numE = originalNumE * 2
+        nodes = 0 until numV
+        edges = 0 until numE
+        forwardEdges = 0 until originalNumE
 
         edgeStarts = IntArray(numV + 1)
         for (l in builder.lefts) ++edgeStarts[l]

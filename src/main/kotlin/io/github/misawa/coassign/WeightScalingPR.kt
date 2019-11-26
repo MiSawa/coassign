@@ -4,9 +4,6 @@ import mu.KLogging
 import kotlin.math.max
 import kotlin.math.min
 
-private typealias Node = Int
-private typealias Edge = Int
-
 class WeightScalingPR(
     private val graph: BipartiteGraph,
     private val params: Params
@@ -24,11 +21,11 @@ class WeightScalingPR(
     private val weights: LargeWeightArray =
         LargeWeightArray(graph.weights.size) { initialScale * graph.weights[it].toLargeWeight() }
 
-    private val nodes: IntRange = 0 until numV
-    private val leftNodes: IntRange = 0 until lSize
-    private val rightNodes: IntRange = lSize until numV
-    private val edges: IntRange = 0 until numE
-    private val forwardEdges: IntRange = 0 until edgeStarts[lSize]
+    private val nodes: NodeRange = 0 until numV
+    private val leftNodes: NodeRange = 0 until lSize
+    private val rightNodes: NodeRange = lSize until numV
+    private val edges: EdgeRange = 0 until numE
+    private val forwardEdges: EdgeRange = 0 until edgeStarts[lSize]
 
     private val minExcessOrig: IntArray = IntArray(numV) { u ->
         if (u < lSize) -graph.multiplicities[u]

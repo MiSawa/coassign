@@ -2,6 +2,11 @@ package io.github.misawa.coassign
 
 import io.github.misawa.coassign.collections.IntArrayList
 
+typealias Node = Int
+typealias Edge = Int
+typealias NodeRange = IntRange
+typealias EdgeRange = IntRange
+
 typealias Flow = Int
 typealias FlowArray = IntArray
 typealias FlowArrayList = IntArrayList

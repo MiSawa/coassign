@@ -3,7 +3,7 @@ package io.github.misawa.coassign
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 
-internal class WeightScalingPRTest {
+internal class WeightScalingDinitzTest {
     companion object {
         private const val NUM_INSTANCES: Int = 10000
         private val SMALL: RandomGraph.Parameter = RandomGraph.Parameter(
@@ -43,6 +43,7 @@ internal class WeightScalingPRTest {
     @ParameterizedTest
     @MethodSource("generateRandomBipartiteGraph")
     fun testRandomly(graph: BipartiteGraph) {
-        WeightScalingPR.run(graph)
+        val solution = WeightScalingDinitz.run(graph, params = WeightScalingDinitz.Params(checkIntermediateStatus = true))
+        solution.check()
     }
 }

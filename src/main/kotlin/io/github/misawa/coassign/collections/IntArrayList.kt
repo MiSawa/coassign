@@ -29,5 +29,8 @@ class IntArrayList private constructor(private val inner: it.unimi.dsi.fastutil.
     fun intStream(): IntStream = Arrays.stream(inner.elements()).limit(inner.size.toLong())
 
     fun push(element: Int) = add(element)
+    fun top(): Int = inner.topInt()
     fun pop(): Int = inner.popInt()
+
+    fun setSize(len: Int) = inner.size(len)
 }
