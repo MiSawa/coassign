@@ -107,6 +107,7 @@ class WeightScalingDinitz(
         potential = LargeWeightArray(rNumV)
         currentEdge = IntArray(rNumV + 1)
         maxRank = (1 + params.scalingFactor) * (2 * graph.lSize + 2)
+        logger.info { "max rank = $maxRank" }
         dialPQ = DialPQ(maxRank, rNumV)
         deficitNodes = IntArrayList(rNumV)
         capFromRoot = FlowArray(graph.numV) { if (it < graph.lSize) graph.multiplicities[it] else 0 }
@@ -125,6 +126,7 @@ class WeightScalingDinitz(
         for (u in allNodes) potential[u] -= potential[root]
         for (u in allNodes) potential[u] =
             (potential[u].toReal() / initialScale.toReal()).roundToLargeWeight() * initialScale
+        logger.info { "Tighten potential" }
         // Tighten dual variables using Bellman-Ford method
         run {
             var cnt = 0
@@ -149,8 +151,10 @@ class WeightScalingDinitz(
         for (u in allNodes) potential[u] -= potential[root]
         val used = BooleanArray(graph.numE)
         for (u in nonRootNodes) for (e in edgeStarts[u] until (edgeStarts[u + 1] - 1)) used[e - u] = !isResidual[e]
-        val pot =
-            WeightArray(graph.numV) { (potential[it].toReal() / initialScale.toReal()).roundToLargeWeight().toWeight() }
+        val pot = WeightArray(graph.numV) {
+            (potential[it].toReal() / initialScale.toReal()).roundToLargeWeight().toWeight()
+        }
+        logger.info { "Finish everything" }
         return Solution(graph, used, pot)
     }
 
@@ -248,13 +252,13 @@ class WeightScalingDinitz(
                 val v = targets[e]
                 if (d >= dialPQ.getDist(v)) continue
                 val rWeight = weights[e] - potentialU + potential[v]
-                val diff = if (rWeight > 0) {
+                val diff: Long = if (rWeight > 0) {
                     0
                 } else {
-                    ((-rWeight) / epsilon).toInt() + 1
+                    ((-rWeight) / epsilon) + 1
                 }
-                if (d + diff <= maxRank) {
-                    dialPQ.push(d + diff, v)
+                if (d + diff < maxRank) {
+                    dialPQ.push(d + diff.toInt(), v)
                 }
             }
         }

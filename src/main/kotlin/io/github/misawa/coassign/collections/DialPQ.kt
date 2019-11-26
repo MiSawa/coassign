@@ -1,16 +1,15 @@
 package io.github.misawa.coassign.collections
 
-class DialPQ(maxLength: Int, private val size: Int) {
+class DialPQ(maxLength: Int, size: Int) {
     private val distances: IntArray = IntArray(size) { Int.MAX_VALUE }
-    private val elements: Array<IntArray> = Array(maxLength + 1) { IntArray(size) }
-    private val sizes: IntArray = IntArray(maxLength + 1)
+    private val elements: Array<IntArrayList> = Array(maxLength + 1) { IntArrayList(1) }
 
     private var currentPriority: Int = 0
     private var currentPos: Int = 0
 
     fun clear() {
         distances.fill(Int.MAX_VALUE)
-        sizes.fill(0)
+        elements.forEach { it.clear() }
         currentPriority = 0
         currentPos = 0
     }
@@ -20,7 +19,7 @@ class DialPQ(maxLength: Int, private val size: Int) {
     /**
      * Can only be called after calling [hasNextElement]
      */
-    fun nextElement(): Int = elements[currentPos][--sizes[currentPos]]
+    fun nextElement(): Int = elements[currentPos].pop()
 
     /**
      * Only valid after calling [nextElement] and before calling [hasNextElement]
@@ -29,10 +28,10 @@ class DialPQ(maxLength: Int, private val size: Int) {
 
     fun hasNextElement(): Boolean {
         for (ignored in elements.indices) {
-            var i = sizes[currentPos] - 1
-            while (i >= 0 && distances[elements[currentPos][i]] != currentPriority) --i
-            sizes[currentPos] = i + 1
-            if (i >= 0) return true
+            val currentElems = elements[currentPos]
+            while (currentElems.isNotEmpty() && distances[currentElems.top()] != currentPriority)
+                currentElems.pop()
+            if (currentElems.isNotEmpty()) return true
             ++currentPriority
             ++currentPos
             if (currentPos == elements.size) currentPos = 0
@@ -42,9 +41,11 @@ class DialPQ(maxLength: Int, private val size: Int) {
 
     fun push(distance: Int, node: Int) {
         if (distances[node] <= distance) return
-        check(distance - currentPriority in sizes.indices)
+        val diff = distance - currentPriority
+        check(diff >= 0)
+        check(diff < elements.size)
         distances[node] = distance
         val pos = distance % elements.size
-        elements[pos][sizes[pos]++] = node
+        elements[pos].push(node)
     }
 }
