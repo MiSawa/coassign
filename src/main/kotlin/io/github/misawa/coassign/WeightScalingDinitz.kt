@@ -1,6 +1,5 @@
 package io.github.misawa.coassign
 
-import io.github.misawa.coassign.collections.DialPQ
 import io.github.misawa.coassign.collections.DialPQLL
 import io.github.misawa.coassign.collections.IntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
@@ -334,7 +333,7 @@ class WeightScalingDinitz(
                         }
                     }
                     dfsStats.stop()
-                    if (path.isEmpty()) {
+                    if (path.isEmpty) {
                         deficitNodes.pop()
                         continue
                     }
