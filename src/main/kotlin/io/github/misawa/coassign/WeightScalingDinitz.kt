@@ -1,6 +1,7 @@
 package io.github.misawa.coassign
 
 import io.github.misawa.coassign.collections.DialPQ
+import io.github.misawa.coassign.collections.DialPQLL
 import io.github.misawa.coassign.collections.IntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
 import mu.KLogging
@@ -36,7 +37,7 @@ class WeightScalingDinitz(
     private val currentEdge: IntArray
     private val isResidual: BooleanArray
     private val excess: FlowArray
-    private val dialPQ: DialPQ
+    private val dialPQ: DialPQLL
     private val deficitNodes: IntArrayList
     private val capToRoot: FlowArray
     private val capFromRoot: FlowArray
@@ -117,7 +118,7 @@ class WeightScalingDinitz(
         currentEdge = IntArray(rNumV + 1)
         maxRank = (1 + params.scalingFactor) * (2 * graph.lSize + 2)
         logger.info { "max rank = $maxRank" }
-        dialPQ = DialPQ(maxRank, rNumV)
+        dialPQ = DialPQLL(maxRank, rNumV)
         deficitNodes = IntArrayList(rNumV)
         capFromRoot = FlowArray(graph.numV) { if (it < graph.lSize) graph.multiplicities[it] else 0 }
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }

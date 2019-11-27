@@ -1,18 +1,19 @@
 package io.github.misawa.coassign.collections
 
 class DialPQLL(maxLength: Int, size: Int) {
+    private val bucketEnd = size
     private val distances: IntArray = IntArray(size) { Int.MAX_VALUE }
     private val first: IntArray = IntArray(maxLength + 1) { -1 }
-    private val prev: IntArray = IntArray(size) { -1 }
-    private val next: IntArray = IntArray(size) { -1 }
+    private val prev: IntArray = IntArray(size + 1) { -1 }
+    private val next: IntArray = IntArray(size + 1) { -1 }
     private var currentPriority: Int = 0
 
     fun clear() {
         currentPriority = 0
         distances.fill(Int.MAX_VALUE)
-        first.fill(-1)
-        prev.fill(-1)
-        next.fill(-1)
+        first.fill(bucketEnd)
+        prev.fill(bucketEnd)
+        next.fill(bucketEnd)
     }
 
     fun getDist(u: Int) = distances[u]
@@ -33,17 +34,24 @@ class DialPQLL(maxLength: Int, size: Int) {
 
     fun hasNextElement(): Boolean {
         while (currentPriority < first.size) {
-            if (first[currentPriority] >= 0) return true
+            if (first[currentPriority] != bucketEnd) return true
             ++currentPriority
         }
         return false
     }
 
     fun push(distance: Int, node: Int) {
-        if (distances[node] <= distance) return
+        val currentDist = distances[node]
+        if (currentDist <= distance) return
         check(currentPriority <= distance)
-        if (next[node] != -1) prev[next[node]] = prev[node]
-        if (prev[node] != -1) next[prev[node]] = next[node]
+        if (currentDist != Int.MAX_VALUE && first[currentDist] == node) {
+            first[currentDist] = next[node]
+        } else {
+            val nx = next[node]
+            val pr = prev[node]
+            prev[nx] = pr
+            next[pr] = nx
+        }
         distances[node] = distance
         val a = first[distance]
         prev[a] = node
