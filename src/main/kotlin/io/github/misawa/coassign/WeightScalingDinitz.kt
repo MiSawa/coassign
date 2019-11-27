@@ -2,13 +2,18 @@ package io.github.misawa.coassign
 
 import io.github.misawa.coassign.collections.DialPQ
 import io.github.misawa.coassign.collections.IntArrayList
+import io.github.misawa.coassign.utils.StatsTracker
 import mu.KLogging
 import kotlin.math.min
 
 class WeightScalingDinitz(
     private val graph: BipartiteGraph,
-    private val params: Params
+    private val params: Params,
+    statsTracker: StatsTracker
 ) {
+    private val globalRelabelStats = statsTracker["GlobalRelabel"]
+    private val dfsStats = statsTracker["DFS"]
+
     private val initialScale: LargeWeight
 
     private val rNumV: Int
@@ -39,7 +44,11 @@ class WeightScalingDinitz(
     private val rcapFromRoot: FlowArray
 
     companion object : KLogging() {
-        fun run(graph: BipartiteGraph, params: Params = Params()): Solution = WeightScalingDinitz(graph, params).run()
+        fun run(
+            graph: BipartiteGraph,
+            params: Params = Params(),
+            statsTracker: StatsTracker = StatsTracker.noop()
+        ): Solution = WeightScalingDinitz(graph, params, statsTracker).run()
     }
 
     data class Params(
@@ -227,47 +236,49 @@ class WeightScalingDinitz(
     }
 
     private fun adjustPotential(): Boolean {
-        checkInvariants()
-        edgeStarts.copyInto(currentEdge)
-        deficitNodes.clear()
-        dialPQ.clear()
-        var totalExcess = 0
-        for (u in allNodes) if (excess[u] > 0) {
-            totalExcess += excess[u]
-            dialPQ.push(0, u)
-        }
-        if (totalExcess == 0) return false
-        var d: Int = 0
-        while (dialPQ.hasNextElement()) {
-            val u = dialPQ.nextElement()
-            d = dialPQ.currentPriority()
-            if (excess[u] < 0) {
-                deficitNodes.push(u)
+        globalRelabelStats.start().use {
+            checkInvariants()
+            edgeStarts.copyInto(currentEdge)
+            deficitNodes.clear()
+            dialPQ.clear()
+            var totalExcess = 0
+            for (u in allNodes) if (excess[u] > 0) {
                 totalExcess += excess[u]
-                if (totalExcess == 0) break
+                dialPQ.push(0, u)
             }
-            val potentialU = potential[u]
-            for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                if (!isResidual[e]) continue
-                val v = targets[e]
-                if (d >= dialPQ.getDist(v)) continue
-                val rWeight = weights[e] - potentialU + potential[v]
-                val diff: Long = if (rWeight > 0) {
-                    0
-                } else {
-                    ((-rWeight) / epsilon) + 1
+            if (totalExcess == 0) return false
+            var d: Int = 0
+            while (dialPQ.hasNextElement()) {
+                val u = dialPQ.nextElement()
+                d = dialPQ.currentPriority()
+                if (excess[u] < 0) {
+                    deficitNodes.push(u)
+                    totalExcess += excess[u]
+                    if (totalExcess == 0) break
                 }
-                if (d + diff < maxRank) {
-                    dialPQ.push(d + diff.toInt(), v)
+                val potentialU = potential[u]
+                for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                    if (!isResidual[e]) continue
+                    val v = targets[e]
+                    if (d >= dialPQ.getDist(v)) continue
+                    val rWeight = weights[e] - potentialU + potential[v]
+                    val diff: Long = if (rWeight > 0) {
+                        0
+                    } else {
+                        ((-rWeight) / epsilon) + 1
+                    }
+                    if (d + diff < maxRank) {
+                        dialPQ.push(d + diff.toInt(), v)
+                    }
                 }
             }
+            for (u in allNodes) {
+                potential[u] += min(d, dialPQ.getDist(u)) * epsilon
+            }
+            check(deficitNodes.isNotEmpty())
+            checkInvariants()
+            return true
         }
-        for (u in allNodes) {
-            potential[u] += min(d, dialPQ.getDist(u)) * epsilon
-        }
-        check(deficitNodes.isNotEmpty())
-        checkInvariants()
-        return true
     }
 
     private fun start() {
@@ -290,6 +301,7 @@ class WeightScalingDinitz(
                     path.clear()
                     path.push(-1)
                     path.push(deficitNode)
+                    dfsStats.start()
                     while (path.isNotEmpty()) {
                         val u = path.top()
                         if (excess[u] > 0) break
@@ -320,6 +332,7 @@ class WeightScalingDinitz(
                             if (path.isNotEmpty()) ++currentEdge[path.top()]
                         }
                     }
+                    dfsStats.stop()
                     if (path.isEmpty()) {
                         deficitNodes.pop()
                         continue

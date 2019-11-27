@@ -1,5 +1,6 @@
 package io.github.misawa.coassign
 
+import io.github.misawa.coassign.utils.StatsTracker
 import kotlin.math.max
 
 class Solution(
