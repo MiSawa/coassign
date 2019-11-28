@@ -299,7 +299,13 @@ class WeightScalingDinitz(
                         deficitNodes.pop()
                         continue
                     }
-                    for (u in (1 until path.size).step(2)) inPath[path[u]] = false
+                    run {
+                        var i = 1
+                        while (i < path.size) {
+                            inPath[path[i]] = false
+                            i += 2
+                        }
+                    }
                     path.clear()
                     path.push(-1)
                     path.push(deficitNode)
