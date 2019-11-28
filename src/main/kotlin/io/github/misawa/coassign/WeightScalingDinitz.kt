@@ -1,7 +1,7 @@
 package io.github.misawa.coassign
 
 import io.github.misawa.coassign.collections.DialPQLL
-import io.github.misawa.coassign.collections.IntArrayList
+import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
 import mu.KLogging
 import kotlin.math.min
@@ -37,7 +37,7 @@ class WeightScalingDinitz(
     private val isResidual: BooleanArray
     private val excess: FlowArray
     private val dialPQ: DialPQLL
-    private val deficitNodes: IntArrayList
+    private val deficitNodes: FixedCapacityIntArrayList
     private val capToRoot: FlowArray
     private val capFromRoot: FlowArray
     private val rcapToRoot: FlowArray
@@ -118,7 +118,7 @@ class WeightScalingDinitz(
         maxRank = (1 + params.scalingFactor) * (2 * graph.lSize + 2)
         logger.info { "max rank = $maxRank" }
         dialPQ = DialPQLL(maxRank, rNumV)
-        deficitNodes = IntArrayList(rNumV)
+        deficitNodes = FixedCapacityIntArrayList(rNumV)
         capFromRoot = FlowArray(graph.numV) { if (it < graph.lSize) graph.multiplicities[it] else 0 }
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }
         rcapFromRoot = capFromRoot.clone()
@@ -283,10 +283,11 @@ class WeightScalingDinitz(
 
     private fun start() {
         initPhase()
-        val path = IntArrayList(rNumV * 2)
+        val path = FixedCapacityIntArrayList(rNumV * 2)
+        val inPath: BooleanArray = BooleanArray(rNumV)
         do {
             checkInvariants()
-            epsilon = Math.max((epsilon + params.scalingFactor - 1) / params.scalingFactor, 1)
+            epsilon = ((epsilon + params.scalingFactor - 1) / params.scalingFactor).coerceAtLeast(1)
             logger.trace { "Phase $epsilon" }
             initPhase()
             checkInvariants()
@@ -298,38 +299,44 @@ class WeightScalingDinitz(
                         deficitNodes.pop()
                         continue
                     }
+                    for (u in (1 until path.size).step(2)) inPath[path[u]] = false
                     path.clear()
                     path.push(-1)
                     path.push(deficitNode)
+                    inPath[deficitNode] = true
                     dfsStats.start()
-                    while (path.isNotEmpty()) {
-                        val u = path.top()
-                        if (excess[u] > 0) break
-                        val potentialU = potential[u]
-                        run onPathTip@{
-                            var e = currentEdge[u]
-                            while (e < edgeStarts[u + 1]) {
-                                val done = run onEdge@{
-                                    val v = targets[e]
-                                    val rWeight = weights[e] - potentialU + potential[v]
-                                    if (rWeight >= 0) return@onEdge false
-                                    val re = reverse[e]
-                                    if (!isResidual[re]) return@onEdge false
-                                    path.push(e)
-                                    path.push(v)
-                                    return@onEdge true
+                    run findPath@{
+                        while (path.isNotEmpty()) {
+                            val u = path.top()
+                            if (excess[u] > 0) break
+                            val potentialU = potential[u]
+                            run onPathTip@{
+                                var e = currentEdge[u]
+                                while (e < edgeStarts[u + 1]) {
+                                    val done = run onEdge@{
+                                        val v = targets[e]
+                                        val rWeight = weights[e] - potentialU + potential[v]
+                                        if (rWeight >= 0) return@onEdge false
+                                        val re = reverse[e]
+                                        if (!isResidual[re]) return@onEdge false
+                                        path.push(e)
+                                        path.push(v)
+                                        if (inPath[v]) return@findPath
+                                        inPath[v] = true
+                                        return@onEdge true
+                                    }
+                                    if (done) {
+                                        currentEdge[u] = e
+                                        return@onPathTip
+                                    }
+                                    ++e
                                 }
-                                if (done) {
-                                    currentEdge[u] = e
-                                    return@onPathTip
-                                }
-                                ++e
+                                currentEdge[u] = edgeStarts[u + 1]
+//                                potential[u] -= epsilon
+                                inPath[path.pop()] = false
+                                path.pop()
+                                if (path.isNotEmpty()) ++currentEdge[path.top()]
                             }
-                            currentEdge[u] = edgeStarts[u + 1]
-//                            potential[u] -= epsilon
-                            path.pop()
-                            path.pop()
-                            if (path.isNotEmpty()) ++currentEdge[path.top()]
                         }
                     }
                     dfsStats.stop()
