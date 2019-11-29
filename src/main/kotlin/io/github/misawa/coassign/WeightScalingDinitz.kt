@@ -284,7 +284,7 @@ class WeightScalingDinitz(
     private fun start() {
         initPhase()
         val path = FixedCapacityIntArrayList(rNumV * 2)
-        val inPath: BooleanArray = BooleanArray(rNumV)
+        val inPath = BooleanArray(rNumV)
         do {
             checkInvariants()
             epsilon = ((epsilon + params.scalingFactor - 1) / params.scalingFactor).coerceAtLeast(1)
@@ -337,8 +337,8 @@ class WeightScalingDinitz(
                                     }
                                     ++e
                                 }
-                                currentEdge[u] = edgeStarts[u + 1]
-//                                potential[u] -= epsilon
+                                currentEdge[u] = edgeStarts[u]
+                                potential[u] += epsilon
                                 inPath[path.pop()] = false
                                 path.pop()
                                 if (path.isNotEmpty()) ++currentEdge[path.top()]
