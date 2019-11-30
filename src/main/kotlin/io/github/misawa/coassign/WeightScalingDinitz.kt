@@ -260,15 +260,16 @@ class WeightScalingDinitz(
                 for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                     if (!isResidual[e]) continue
                     val v = targets[e]
-                    if (d >= dialPQ.getDist(v)) continue
+                    val currentDistV = dialPQ.getDist(v).coerceAtMost(maxRank)
+                    if (d >= currentDistV) continue
                     val rWeight = weights[e] - potentialU + potential[v]
-                    val diff: Long = if (rWeight > 0) {
+                    val diff: Int = if (rWeight > 0) {
                         0
                     } else {
-                        ((-rWeight) / epsilon) + 1
+                        (((-rWeight) / epsilon) + 1).coerceAtMost(maxRank.toLong()).toInt()
                     }
-                    if (d + diff < maxRank) {
-                        dialPQ.push(d + diff.toInt(), v)
+                    if (d + diff < currentDistV) {
+                        dialPQ.push(d + diff, v)
                     }
                 }
             }
@@ -295,7 +296,7 @@ class WeightScalingDinitz(
                 // blocking flow
                 while (deficitNodes.isNotEmpty()) {
                     val deficitNode = deficitNodes.top()
-                    if (excess[deficitNode] >= 0) {
+                    if (excess[deficitNode] >= 0 || currentEdge[deficitNode] == edgeStarts[deficitNode+1]) {
                         deficitNodes.pop()
                         continue
                     }
@@ -325,6 +326,7 @@ class WeightScalingDinitz(
                                         if (rWeight >= 0) return@onEdge false
                                         val re = reverse[e]
                                         if (!isResidual[re]) return@onEdge false
+                                        if (currentEdge[v] == edgeStarts[v+1]) return@onEdge false
                                         path.push(e)
                                         path.push(v)
                                         if (inPath[v]) return@findPath
@@ -337,8 +339,9 @@ class WeightScalingDinitz(
                                     }
                                     ++e
                                 }
-                                currentEdge[u] = edgeStarts[u]
+                                currentEdge[u] = edgeStarts[u+1]
                                 potential[u] += epsilon
+                                checkInvariants()
                                 inPath[path.pop()] = false
                                 path.pop()
                                 if (path.isNotEmpty()) ++currentEdge[path.top()]
