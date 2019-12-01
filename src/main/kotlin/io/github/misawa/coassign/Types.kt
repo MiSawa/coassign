@@ -6,6 +6,8 @@ typealias Node = Int
 typealias Edge = Int
 typealias NodeRange = IntRange
 typealias EdgeRange = IntRange
+typealias NodeToIntArray = IntArray
+typealias EdgeToIntArray = IntArray
 
 typealias Flow = Int
 typealias FlowArray = IntArray

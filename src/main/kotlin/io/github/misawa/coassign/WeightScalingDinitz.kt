@@ -1,6 +1,6 @@
 package io.github.misawa.coassign
 
-import io.github.misawa.coassign.collections.DialPQLL
+import io.github.misawa.coassign.collections.BucketsLL
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
 import mu.KLogging
@@ -36,7 +36,7 @@ class WeightScalingDinitz(
     private val currentEdge: IntArray
     private val isResidual: BooleanArray
     private val excess: FlowArray
-    private val dialPQ: DialPQLL
+    private val buckets: BucketsLL
     private val deficitNodes: FixedCapacityIntArrayList
     private val capToRoot: FlowArray
     private val capFromRoot: FlowArray
@@ -117,7 +117,7 @@ class WeightScalingDinitz(
         currentEdge = IntArray(rNumV + 1)
         maxRank = (1 + params.scalingFactor) * (2 * graph.lSize + 2)
         logger.info { "max rank = $maxRank" }
-        dialPQ = DialPQLL(maxRank, rNumV)
+        buckets = BucketsLL(maxRank, rNumV)
         deficitNodes = FixedCapacityIntArrayList(rNumV)
         capFromRoot = FlowArray(graph.numV) { if (it < graph.lSize) graph.multiplicities[it] else 0 }
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }
@@ -235,46 +235,93 @@ class WeightScalingDinitz(
         checkInvariants()
     }
 
+    private fun tsort(result: FixedCapacityIntArrayList, deg: NodeToIntArray): Boolean {
+        result.clear()
+        deg.fill(0)
+        for (u in allNodes) {
+            val potentialU = potential[u]
+            for (e in edgeStarts[u] until edgeStarts[u+1]) {
+                if (!isResidual[e]) continue
+                val v = targets[e]
+                val rWeight = weights[e] - potentialU + potential[v]
+                if (rWeight > 0) ++deg[v]
+            }
+        }
+        for (u in allNodes) if (deg[u] == 0) result.push(u)
+        for (u in result) {
+            val potentialU = potential[u]
+            for (e in edgeStarts[u] until edgeStarts[u+1]) {
+                if (!isResidual[e]) continue
+                val v = targets[e]
+                val rWeight = weights[e] - potentialU + potential[v]
+                if (rWeight > 0) if (--deg[v] == 0) result.push(v)
+            }
+        }
+        return result.size == rNumV
+    }
+
+    private fun priceRefine(): Boolean {
+        val buf = NodeToIntArray(rNumV)
+        val tsorted = FixedCapacityIntArrayList(rNumV)
+        buckets.clear()
+        while (tsort(tsorted, buf)) {
+            for (u in tsorted) {
+                val potentialU = potential[u]
+                val label = buckets.getBucket(u)
+                for (e in edgeStarts[u] until edgeStarts[u+1]) {
+                    if (!isResidual[e]) continue
+                    val v = targets[e]
+                    val rWeight = weights[e] - potentialU + potential[v]
+                    if (rWeight <= 0) continue
+                }
+            }
+        }
+        TODO()
+    }
+
     private fun adjustPotential(): Boolean {
         globalRelabelStats.start().use {
             checkInvariants()
             edgeStarts.copyInto(currentEdge)
             deficitNodes.clear()
-            dialPQ.clear()
+            buckets.clear(buckets.maxBucketId)
             var totalExcess = 0
             for (u in allNodes) if (excess[u] > 0) {
                 totalExcess += excess[u]
-                dialPQ.push(0, u)
+                buckets.setBucket(0, u)
             }
             if (totalExcess == 0) return false
             var d: Int = 0
-            while (dialPQ.hasNextElement()) {
-                val u = dialPQ.nextElement()
-                d = dialPQ.currentPriority()
-                if (excess[u] < 0) {
-                    deficitNodes.push(u)
-                    totalExcess += excess[u]
-                    if (totalExcess == 0) break
-                }
-                val potentialU = potential[u]
-                for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                    if (!isResidual[e]) continue
-                    val v = targets[e]
-                    val currentDistV = dialPQ.getDist(v).coerceAtMost(maxRank)
-                    if (d >= currentDistV) continue
-                    val rWeight = weights[e] - potentialU + potential[v]
-                    val diff: Int = if (rWeight > 0) {
-                        0
-                    } else {
-                        (((-rWeight) / epsilon) + 1).coerceAtMost(maxRank.toLong()).toInt()
+            while (d <= buckets.maxBucketId) {
+                while (buckets.hasNextElement(d)) {
+                    val u = buckets.nextElement(d)
+                    if (excess[u] < 0) {
+                        deficitNodes.push(u)
+                        totalExcess += excess[u]
+                        if (totalExcess == 0) break
                     }
-                    if (d + diff < currentDistV) {
-                        dialPQ.push(d + diff, v)
+                    val potentialU = potential[u]
+                    for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                        if (!isResidual[e]) continue
+                        val v = targets[e]
+                        val currentDistV = buckets.getBucket(v).coerceAtMost(maxRank)
+                        if (d >= currentDistV) continue
+                        val rWeight = weights[e] - potentialU + potential[v]
+                        val diff: Int = if (rWeight > 0) {
+                            0
+                        } else {
+                            (((-rWeight) / epsilon) + 1).coerceAtMost(maxRank.toLong()).toInt()
+                        }
+                        if (d + diff < currentDistV) {
+                            buckets.setBucket(d + diff, v)
+                        }
                     }
                 }
+                if (totalExcess == 0) break
+                ++d
             }
             for (u in allNodes) {
-                potential[u] += min(d, dialPQ.getDist(u)) * epsilon
+                potential[u] += min(d, buckets.getBucket(u)) * epsilon
             }
             check(deficitNodes.isNotEmpty())
             checkInvariants()
