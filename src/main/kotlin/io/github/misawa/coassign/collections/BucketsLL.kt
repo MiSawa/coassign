@@ -17,9 +17,9 @@ class BucketsLL(val maxBucketId: Int, size: Int) {
     fun clear(bucketId: Int) {
         bucketIds.fill(bucketId)
         first.fill(bucketEnd)
-        for (i in 0 .. bucketEnd) {
-            prev[i] = i-1
-            next[i] = i+1
+        for (i in 0..bucketEnd) {
+            prev[i] = i - 1
+            next[i] = i + 1
         }
         prev[0] = bucketEnd
         next[bucketEnd] = bucketEnd
@@ -34,7 +34,7 @@ class BucketsLL(val maxBucketId: Int, size: Int) {
         return ret
     }
 
-    fun setBucket(bucketId: Int, element: Int) {
+    fun setBucket(element: Int, bucketId: Int) {
         val currentBucket = bucketIds[element]
         // Unlink from the current bucket
         if (currentBucket >= 0) {
