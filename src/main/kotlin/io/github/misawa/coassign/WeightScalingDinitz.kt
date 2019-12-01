@@ -1,6 +1,6 @@
 package io.github.misawa.coassign
 
-import io.github.misawa.coassign.collections.BucketsLL
+import io.github.misawa.coassign.collections.BucketsArray
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
 import mu.KLogging
@@ -13,6 +13,8 @@ class WeightScalingDinitz(
 ) {
     private val globalRelabelStats = statsTracker["GlobalRelabel"]
     private val dfsStats = statsTracker["DFS"]
+    private val tsortStats = statsTracker["TSort"]
+    private val priceRefine = statsTracker["PriceRefine"]
 
     private val initialScale: LargeWeight
 
@@ -36,7 +38,7 @@ class WeightScalingDinitz(
     private val currentEdge: IntArray
     private val isResidual: BooleanArray
     private val excess: FlowArray
-    private val buckets: BucketsLL
+    private val buckets: BucketsArray
     private val deficitNodes: FixedCapacityIntArrayList
     private val capToRoot: FlowArray
     private val capFromRoot: FlowArray
@@ -52,7 +54,7 @@ class WeightScalingDinitz(
     }
 
     data class Params(
-        val scalingFactor: Weight = 2,
+        val scalingFactor: Weight = 8,
         val checkIntermediateStatus: Boolean = false
     ) {
         init {
@@ -117,7 +119,7 @@ class WeightScalingDinitz(
         currentEdge = IntArray(rNumV + 1)
         maxRank = (1 + params.scalingFactor) * (2 * graph.lSize + 2) + 1
         logger.info { "max rank = $maxRank" }
-        buckets = BucketsLL(maxRank, rNumV)
+        buckets = BucketsArray(maxRank, rNumV)
         deficitNodes = FixedCapacityIntArrayList(rNumV)
         capFromRoot = FlowArray(graph.numV) { if (it < graph.lSize) graph.multiplicities[it] else 0 }
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }
@@ -236,86 +238,92 @@ class WeightScalingDinitz(
     }
 
     private fun tsort(result: FixedCapacityIntArrayList, deg: NodeToIntArray): Boolean {
-        result.clear()
-        deg.fill(0)
-        for (u in allNodes) {
-            val potentialU = potential[u]
-            for (e in edgeStarts[u] until edgeStarts[u+1]) {
-                if (!isResidual[e]) continue
-                val v = targets[e]
-                val rWeight = weights[e] - potentialU + potential[v]
-                if (rWeight > 0) ++deg[v]
-            }
-        }
-        for (u in allNodes) if (deg[u] == 0) result.push(u)
-        for (u in result) {
-            val potentialU = potential[u]
-            for (e in edgeStarts[u] until edgeStarts[u+1]) {
-                if (!isResidual[e]) continue
-                val v = targets[e]
-                val rWeight = weights[e] - potentialU + potential[v]
-                if (rWeight > 0) if (--deg[v] == 0) result.push(v)
-            }
-        }
-        return result.size == rNumV
-    }
-
-    private fun priceRefine(): Boolean {
-        checkInvariants(epsilon * params.scalingFactor)
-        val buf = NodeToIntArray(rNumV)
-        val tsorted = FixedCapacityIntArrayList(rNumV)
-        while (tsort(tsorted, buf)) {
-            buckets.clear(0)
-            var maxBucket = 0
-            for (u in tsorted) {
+        tsortStats.start().use {
+            result.clear()
+            deg.fill(0)
+            for (u in allNodes) {
                 val potentialU = potential[u]
-                val bucketU = buckets.getBucket(u)
-                maxBucket = maxBucket.coerceAtLeast(bucketU)
-                for (e in edgeStarts[u] until edgeStarts[u+1]) {
+                for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                     if (!isResidual[e]) continue
                     val v = targets[e]
                     val rWeight = weights[e] - potentialU + potential[v]
-                    if (rWeight <= 0) continue
-                    // min k s.t. rWeight + k epsilon >= - epsilon && k >= 0
-                    val k = (rWeight - 1) / epsilon
-                    val newBucket = bucketU + k
-                    if (newBucket > buckets.getBucket(v) && newBucket <= maxRank) {
-                        buckets.setBucket(v, newBucket.toInt())
-                    }
+                    if (rWeight > 0) ++deg[v]
                 }
             }
-            var b = maxBucket
-            if (b == 0) {
-                checkInvariants(epsilon)
-                return true
+            for (u in allNodes) if (deg[u] == 0) result.push(u)
+            for (u in result) {
+                val potentialU = potential[u]
+                for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                    if (!isResidual[e]) continue
+                    val v = targets[e]
+                    val rWeight = weights[e] - potentialU + potential[v]
+                    if (rWeight > 0) if (--deg[v] == 0) result.push(v)
+                }
             }
-            while (b >= 0) {
-                while (buckets.hasNextElement(b)) {
-                    val u = buckets.nextElement(b)
+            return result.size == rNumV
+        }
+    }
+
+    private fun priceRefine(): Boolean {
+        priceRefine.start().use {
+            checkInvariants(epsilon * params.scalingFactor)
+            val buf = NodeToIntArray(rNumV)
+            val tsorted = FixedCapacityIntArrayList(rNumV)
+            while (tsort(tsorted, buf)) {
+                buckets.clear(0)
+                var maxBucket = 0
+                for (u in tsorted) {
                     val potentialU = potential[u]
-                    for (e in edgeStarts[u] until edgeStarts[u+1]) {
+                    val bucketU = buckets.getBucket(u)
+                    maxBucket = maxBucket.coerceAtLeast(bucketU)
+                    for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                         if (!isResidual[e]) continue
                         val v = targets[e]
-                        val bucketV = buckets.getBucket(v)
-                        if (bucketV >= b) continue
                         val rWeight = weights[e] - potentialU + potential[v]
-                        val newBucketV = if (rWeight <= 0) {
-                            val d = (-rWeight) / epsilon
-                            (b - (d + 1)).coerceAtLeast(0).toInt()
-                        } else {
-                            b
-                        }
-                        if (bucketV < newBucketV) {
-                            buckets.setBucket(v, newBucketV)
+                        if (rWeight <= 0) continue
+                        // min k s.t. rWeight + k epsilon >= - epsilon && k >= 0
+                        val k = (rWeight - 1) / epsilon
+                        val newBucket = bucketU + k
+                        if (newBucket > buckets.getBucket(v) && newBucket <= maxRank) {
+                            buckets.setBucket(v, newBucket.toInt())
                         }
                     }
-                    potential[u] -= b * epsilon
                 }
-                --b
+                var b = maxBucket
+                if (b == 0) {
+                    logger.trace { "Price refinement succeed" }
+                    checkInvariants(epsilon)
+                    return true
+                }
+                while (b >= 0) {
+                    while (buckets.hasNextElement(b)) {
+                        val u = buckets.nextElement(b)
+                        val potentialU = potential[u]
+                        for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                            if (!isResidual[e]) continue
+                            val v = targets[e]
+                            val bucketV = buckets.getBucket(v)
+                            if (bucketV >= b) continue
+                            val rWeight = weights[e] - potentialU + potential[v]
+                            val newBucketV = if (rWeight <= 0) {
+                                val d = (-rWeight) / epsilon
+                                if (b <= d) 0
+                                else (b - (d + 1)).toInt()
+                            } else {
+                                b
+                            }
+                            if (bucketV < newBucketV) {
+                                buckets.setBucket(v, newBucketV)
+                            }
+                        }
+                        potential[u] -= b * epsilon
+                    }
+                    --b
+                }
+                checkInvariants(epsilon * params.scalingFactor)
             }
-            checkInvariants(epsilon * params.scalingFactor)
+            return false
         }
-        return false
     }
 
     private fun adjustPotential(): Boolean {
@@ -343,13 +351,15 @@ class WeightScalingDinitz(
                     for (e in edgeStarts[u] until edgeStarts[u + 1]) {
                         if (!isResidual[e]) continue
                         val v = targets[e]
-                        val currentDistV = buckets.getBucket(v).coerceAtMost(maxRank)
+                        val currentDistV = buckets.getBucket(v)
                         if (d >= currentDistV) continue
                         val rWeight = weights[e] - potentialU + potential[v]
                         val diff: Int = if (rWeight > 0) {
                             0
                         } else {
-                            (((-rWeight) / epsilon) + 1).coerceAtMost(maxRank.toLong()).toInt()
+                            val tmp = (((-rWeight) / epsilon) + 1)
+                            if (tmp < maxRank) tmp.toInt()
+                            else maxRank
                         }
                         val newDist = d + diff
                         if (newDist < currentDistV) {
@@ -386,7 +396,7 @@ class WeightScalingDinitz(
                 // blocking flow
                 while (deficitNodes.isNotEmpty()) {
                     val deficitNode = deficitNodes.top()
-                    if (excess[deficitNode] >= 0 || currentEdge[deficitNode] == edgeStarts[deficitNode+1]) {
+                    if (excess[deficitNode] >= 0 || currentEdge[deficitNode] == edgeStarts[deficitNode + 1]) {
                         deficitNodes.pop()
                         continue
                     }
@@ -416,7 +426,7 @@ class WeightScalingDinitz(
                                         if (rWeight >= 0) return@onEdge false
                                         val re = reverse[e]
                                         if (!isResidual[re]) return@onEdge false
-                                        if (currentEdge[v] == edgeStarts[v+1]) return@onEdge false
+                                        if (currentEdge[v] == edgeStarts[v + 1]) return@onEdge false
                                         path.push(e)
                                         path.push(v)
                                         if (inPath[v]) return@findPath
@@ -429,7 +439,7 @@ class WeightScalingDinitz(
                                     }
                                     ++e
                                 }
-                                currentEdge[u] = edgeStarts[u+1]
+                                currentEdge[u] = edgeStarts[u + 1]
                                 potential[u] += epsilon
                                 checkInvariants()
                                 inPath[path.pop()] = false

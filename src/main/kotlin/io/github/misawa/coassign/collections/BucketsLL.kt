@@ -1,6 +1,6 @@
 package io.github.misawa.coassign.collections
 
-class BucketsLL(val maxBucketId: Int, size: Int) {
+class BucketsLL(maxBucketId: Int, size: Int) {
     private val bucketEnd = size
     private val bucketIds: IntArray = IntArray(size) { -1 }
     private val first: IntArray = IntArray(maxBucketId + 1) { -1 }
