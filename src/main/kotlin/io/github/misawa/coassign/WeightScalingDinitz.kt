@@ -2,6 +2,7 @@ package io.github.misawa.coassign
 
 import io.github.misawa.coassign.collections.BucketsArray
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
+import io.github.misawa.coassign.collections.IntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
 import mu.KLogging
 import kotlin.math.min
@@ -11,10 +12,11 @@ class WeightScalingDinitz(
     private val params: Params,
     statsTracker: StatsTracker
 ) {
-    private val globalRelabelStats = statsTracker["GlobalRelabel"]
-    private val dfsStats = statsTracker["DFS"]
-    private val tsortStats = statsTracker["TSort"]
-    private val priceRefine = statsTracker["PriceRefine"]
+    private val globalRelabelStats = statsTracker.timer("GlobalRelabel")
+    private val dfsStats = statsTracker.timer("DFS")
+    private val tsortStats = statsTracker.timer("TSort")
+    private val priceRefineStats = statsTracker.timer("PriceRefine")
+    private val pushCount = statsTracker.counter("Push")
 
     private val initialScale: LargeWeight
 
@@ -238,7 +240,7 @@ class WeightScalingDinitz(
     }
 
     private fun tsort(result: FixedCapacityIntArrayList, deg: NodeToIntArray): Boolean {
-        tsortStats.start().use {
+        tsortStats.timed {
             result.clear()
             deg.fill(0)
             for (u in allNodes) {
@@ -265,7 +267,7 @@ class WeightScalingDinitz(
     }
 
     private fun priceRefine(): Boolean {
-        priceRefine.start().use {
+        priceRefineStats.timed {
             checkInvariants(epsilon * params.scalingFactor)
             val buf = NodeToIntArray(rNumV)
             val tsorted = FixedCapacityIntArrayList(rNumV)
@@ -327,7 +329,7 @@ class WeightScalingDinitz(
     }
 
     private fun adjustPotential(): Boolean {
-        globalRelabelStats.start().use {
+        globalRelabelStats.timed {
             checkInvariants()
             edgeStarts.copyInto(currentEdge)
             deficitNodes.clear()
@@ -384,6 +386,7 @@ class WeightScalingDinitz(
         val path = FixedCapacityIntArrayList(rNumV * 2)
         val inPath = BooleanArray(rNumV)
         var numPhase = 0
+        val stillDeficit = IntArrayList()
         do {
             checkInvariants()
             epsilon = ((epsilon + params.scalingFactor - 1) / params.scalingFactor).coerceAtLeast(1)
@@ -393,110 +396,123 @@ class WeightScalingDinitz(
             initPhase()
             checkInvariants()
             while (adjustPotential()) {
-                // blocking flow
-                while (deficitNodes.isNotEmpty()) {
-                    val deficitNode = deficitNodes.top()
-                    if (excess[deficitNode] >= 0 || currentEdge[deficitNode] == edgeStarts[deficitNode + 1]) {
-                        deficitNodes.pop()
-                        continue
-                    }
-                    run {
-                        var i = 1
-                        while (i < path.size) {
-                            inPath[path[i]] = false
-                            i += 2
+                var contiguousNonpush = 0
+                while (true) {
+                    stillDeficit.clear()
+                    var pushed = false
+                    while (deficitNodes.isNotEmpty()) {
+                        val deficitNode = deficitNodes.top()
+                        if (excess[deficitNode] >= 0 || currentEdge[deficitNode] == edgeStarts[deficitNode + 1]) {
+                            if (excess[deficitNode] < 0) stillDeficit.push(deficitNode)
+                            deficitNodes.pop()
+                            continue
                         }
-                    }
-                    path.clear()
-                    path.push(-1)
-                    path.push(deficitNode)
-                    inPath[deficitNode] = true
-                    dfsStats.start()
-                    run findPath@{
-                        while (path.isNotEmpty()) {
-                            val u = path.top()
-                            if (excess[u] > 0) break
-                            val potentialU = potential[u]
-                            run onPathTip@{
-                                var e = currentEdge[u]
-                                while (e < edgeStarts[u + 1]) {
-                                    val done = run onEdge@{
-                                        val v = targets[e]
-                                        val rWeight = weights[e] - potentialU + potential[v]
-                                        if (rWeight >= 0) return@onEdge false
-                                        val re = reverse[e]
-                                        if (!isResidual[re]) return@onEdge false
-                                        if (currentEdge[v] == edgeStarts[v + 1]) return@onEdge false
-                                        path.push(e)
-                                        path.push(v)
-                                        if (inPath[v]) return@findPath
-                                        inPath[v] = true
-                                        return@onEdge true
+                        run {
+                            var i = 1
+                            while (i < path.size) {
+                                inPath[path[i]] = false
+                                i += 2
+                            }
+                        }
+                        path.clear()
+                        path.push(-1)
+                        path.push(deficitNode)
+                        inPath[deficitNode] = true
+                        dfsStats.start()
+                        run findPath@{
+                            while (path.isNotEmpty()) {
+                                val u = path.top()
+                                if (excess[u] > 0) break
+                                val potentialU = potential[u]
+                                run onPathTip@{
+                                    var e = currentEdge[u]
+                                    while (e < edgeStarts[u + 1]) {
+                                        val done = run onEdge@{
+                                            val v = targets[e]
+                                            val rWeight = weights[e] - potentialU + potential[v]
+                                            if (rWeight >= 0) return@onEdge false
+                                            val re = reverse[e]
+                                            if (!isResidual[re]) return@onEdge false
+                                            if (currentEdge[v] == edgeStarts[v + 1]) return@onEdge false
+                                            path.push(e)
+                                            path.push(v)
+                                            if (inPath[v]) return@findPath
+                                            inPath[v] = true
+                                            return@onEdge true
+                                        }
+                                        if (done) {
+                                            currentEdge[u] = e
+                                            return@onPathTip
+                                        }
+                                        ++e
                                     }
-                                    if (done) {
-                                        currentEdge[u] = e
-                                        return@onPathTip
-                                    }
-                                    ++e
+                                    currentEdge[u] = edgeStarts[u]
+                                    potential[u] += epsilon
+                                    checkInvariants()
+                                    inPath[path.pop()] = false
+                                    path.pop()
+                                    if (path.isNotEmpty()) ++currentEdge[path.top()]
                                 }
-                                currentEdge[u] = edgeStarts[u + 1]
-                                potential[u] += epsilon
-                                checkInvariants()
-                                inPath[path.pop()] = false
-                                path.pop()
-                                if (path.isNotEmpty()) ++currentEdge[path.top()]
                             }
                         }
-                    }
-                    dfsStats.stop()
-                    if (path.isEmpty) {
-                        deficitNodes.pop()
-                        continue
-                    }
-                    if (path.size == 4 && ((path[1] == root) || (path[3] == root))) {
-                        val flowFromRoot = path[3] == root
-                        val eFromRoot = if (flowFromRoot) reverse[path[2]] else path[2]
-                        val eToRoot = if (!flowFromRoot) reverse[path[2]] else path[2]
-                        val other = if (flowFromRoot) path[1] else path[3]
-                        val flow = if (flowFromRoot) {
-                            min(excess[root], min(rcapFromRoot[other], -excess[other]))
-                        } else {
-                            -min(excess[other], min(rcapToRoot[other], -excess[root]))
+                        dfsStats.stop()
+                        if (path.isEmpty) {
+                            if (excess[deficitNode] < 0) stillDeficit.push(deficitNode)
+                            deficitNodes.pop()
+                            continue
                         }
-                        excess[root] -= flow
-                        excess[other] += flow
-                        rcapFromRoot[other] -= flow
-                        rcapToRoot[other] += flow
-                        isResidual[eFromRoot] = rcapFromRoot[other] > 0
-                        isResidual[eToRoot] = rcapToRoot[other] > 0
-                    } else {
-                        ++excess[deficitNode]
-                        --excess[path.top()]
-                        var i = 2
-                        while (i < path.size) {
-                            val u = path[i - 1]
-                            val e = path[i]
-                            val v = path[i + 1]
-                            val re = reverse[e]
-                            if (u == root) {
-                                ++rcapFromRoot[v]
-                                --rcapToRoot[v]
-                                isResidual[e] = true
-                                if (rcapToRoot[v] == 0) isResidual[re] = false
-                            } else if (v == root) {
-                                --rcapFromRoot[u]
-                                ++rcapToRoot[u]
-                                isResidual[e] = true
-                                if (rcapFromRoot[u] == 0) isResidual[re] = false
+                        pushCount.inc(path.size / 2)
+                        pushed = true
+                        if (path.size == 4 && ((path[1] == root) || (path[3] == root))) {
+                            val flowFromRoot = path[3] == root
+                            val eFromRoot = if (flowFromRoot) reverse[path[2]] else path[2]
+                            val eToRoot = if (!flowFromRoot) reverse[path[2]] else path[2]
+                            val other = if (flowFromRoot) path[1] else path[3]
+                            val flow = if (flowFromRoot) {
+                                min(excess[root], min(rcapFromRoot[other], -excess[other]))
                             } else {
-                                isResidual[e] = true
-                                isResidual[re] = false
+                                -min(excess[other], min(rcapToRoot[other], -excess[root]))
                             }
-                            i += 2
+                            excess[root] -= flow
+                            excess[other] += flow
+                            rcapFromRoot[other] -= flow
+                            rcapToRoot[other] += flow
+                            isResidual[eFromRoot] = rcapFromRoot[other] > 0
+                            isResidual[eToRoot] = rcapToRoot[other] > 0
+                        } else {
+                            ++excess[deficitNode]
+                            --excess[path.top()]
+                            var i = 2
+                            while (i < path.size) {
+                                val u = path[i - 1]
+                                val e = path[i]
+                                val v = path[i + 1]
+                                val re = reverse[e]
+                                if (u == root) {
+                                    ++rcapFromRoot[v]
+                                    --rcapToRoot[v]
+                                    isResidual[e] = true
+                                    if (rcapToRoot[v] == 0) isResidual[re] = false
+                                } else if (v == root) {
+                                    --rcapFromRoot[u]
+                                    ++rcapToRoot[u]
+                                    isResidual[e] = true
+                                    if (rcapFromRoot[u] == 0) isResidual[re] = false
+                                } else {
+                                    isResidual[e] = true
+                                    isResidual[re] = false
+                                }
+                                i += 2
+                            }
                         }
+                        checkInvariants()
                     }
-
-                    checkInvariants()
+                    if (stillDeficit.isEmpty) break
+                    if (!pushed) ++contiguousNonpush
+                    else contiguousNonpush = 0
+                    if (contiguousNonpush < 2) {
+                        deficitNodes.addAll(stillDeficit.iterator())
+                    }
                 }
             }
         } while (epsilon > 1)

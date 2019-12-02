@@ -26,6 +26,10 @@ class FixedCapacityIntArrayList(maxCapacity: Int) {
         override fun nextInt(): Int = arr[i++]
     }
 
+    fun addAll(it: IntIterator) {
+        while (it.hasNext()) push(it.nextInt())
+    }
+
     fun push(element: Int) {
         arr[currentSize++] = element
     }

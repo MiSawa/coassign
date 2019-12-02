@@ -2,37 +2,36 @@ package io.github.misawa.coassign.utils
 
 import java.io.Closeable
 
-interface Timer {
-    fun <T> timed(inner: () -> T): T
-    fun start(): Closeable
-    fun stop()
-}
-
-class TimerImpl : Timer {
-    private var totalTime: Long = 0
-    private var count: Int = 0
-    private var start: Long = -1
+class Timer(val noop: Boolean) {
+    var totalTime: Long = 0
+    var count: Int = 0
+    var start: Long = -1
 
     companion object {
-        private fun now(): Long = System.currentTimeMillis()
+        fun now(): Long = System.currentTimeMillis()
     }
 
-    override fun <T> timed(inner: () -> T): T {
+    inline fun <T> timed(inner: () -> T): T {
+        if (noop) return inner.invoke()
         val start = now()
-        val end = now()
-        val ret = inner.invoke()
-        ++count
-        totalTime += end - start
-        return ret
+        try {
+            return inner.invoke()
+        } finally {
+            val end = now()
+            ++count
+            totalTime += end - start
+        }
     }
 
-    override fun start(): Closeable {
+    fun start(): Closeable {
+        if (noop) return Closeable {}
         check(start == -1L)
         start = now()
         return Closeable { stop() }
     }
 
-    override fun stop() {
+    fun stop() {
+        if (noop) return
         val end = now()
         check(start >= 0)
         ++count
@@ -40,26 +39,47 @@ class TimerImpl : Timer {
         start = -1
     }
 
-    override fun toString(): String{
+    override fun toString(): String {
         check(start == -1L)
         return "Timer{ totalTIme=$totalTime, count=$count }"
     }
 }
 
-object NOOPTimer : Timer {
-    override fun <T> timed(inner: () -> T): T = inner.invoke()
-    override fun start(): Closeable = Closeable {}
-    override fun stop() {}
+interface Counter {
+    fun inc()
+    fun inc(incr: Int)
 }
 
-class StatsTracker(private val supplier: () -> Timer = { NOOPTimer }) {
+private object NOOPCounter : Counter {
+    override fun inc() {}
+    override fun inc(incr: Int) {}
+}
+
+private class CounterImpl : Counter {
+    var count = 0
+
+    override fun inc() {
+        ++count
+    }
+
+    override fun inc(incr: Int) {
+        count += incr
+    }
+
+    override fun toString(): String = "Counter{ count=$count }"
+}
+
+class StatsTracker(private val noop: Boolean) {
     companion object {
-        fun noop(): StatsTracker = StatsTracker()
-        fun millis(): StatsTracker = StatsTracker { TimerImpl() }
+        fun noop(): StatsTracker = StatsTracker(true)
+        fun millis(): StatsTracker = StatsTracker(false)
     }
 
     private val timers: LinkedHashMap<String, Timer> = LinkedHashMap()
-    operator fun get(name: String) = timers.computeIfAbsent(name) { supplier() }
+    private val counters: LinkedHashMap<String, Counter> = LinkedHashMap()
+    fun timer(name: String) = timers.computeIfAbsent(name) { Timer(noop) }
+    fun counter(name: String) = counters.computeIfAbsent(name) { if (noop) NOOPCounter else CounterImpl() }
 
-    fun getStats() = timers
+    fun getTimeStats() = timers
+    fun getCounts() = counters
 }

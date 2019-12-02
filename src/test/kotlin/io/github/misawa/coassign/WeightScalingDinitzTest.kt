@@ -1,5 +1,7 @@
 package io.github.misawa.coassign
 
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 
@@ -42,6 +44,7 @@ internal class WeightScalingDinitzTest {
 
     @ParameterizedTest
     @MethodSource("generateRandomBipartiteGraph")
+    @Timeout(1)
     fun testRandomly(graph: BipartiteGraph) {
         val solution = WeightScalingDinitz.run(graph, params = WeightScalingDinitz.Params(checkIntermediateStatus = true))
         solution.check()
