@@ -4,6 +4,7 @@ import io.github.misawa.coassign.collections.BucketsArray
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
 import io.github.misawa.coassign.collections.IntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap
 import mu.KLogging
 import kotlin.math.min
 
@@ -381,12 +382,111 @@ class WeightScalingDinitz(
         }
     }
 
+    private fun pull(u: Int, v: Int, e: Int, re: Int) {
+        if ((u == root) || (v == root)) {
+            val flowFromRoot = v == root
+            val eFromRoot = if (flowFromRoot) re else e
+            val eToRoot = if (!flowFromRoot) re else e
+            val nonRoot = if (flowFromRoot) u else v
+            val flow = if (flowFromRoot) {
+                min(excess[root], min(rcapFromRoot[nonRoot], -excess[nonRoot]))
+            } else {
+                -min(excess[nonRoot], min(rcapToRoot[nonRoot], -excess[root]))
+            }
+            excess[root] -= flow
+            excess[nonRoot] += flow
+            rcapFromRoot[nonRoot] -= flow
+            rcapToRoot[nonRoot] += flow
+            isResidual[eFromRoot] = rcapFromRoot[nonRoot] > 0
+            isResidual[eToRoot] = rcapToRoot[nonRoot] > 0
+        } else {
+            ++excess[u]
+            --excess[v]
+            isResidual[e] = true
+            isResidual[re] = false
+        }
+        checkInvariants()
+    }
+
+    private fun pull(backwardPath: FixedCapacityIntArrayList) {
+        if (backwardPath.size == 4 && ((backwardPath[1] == root) || (backwardPath[3] == root))) {
+            val flowFromRoot = backwardPath[3] == root
+            val eFromRoot = if (flowFromRoot) reverse[backwardPath[2]] else backwardPath[2]
+            val eToRoot = if (!flowFromRoot) reverse[backwardPath[2]] else backwardPath[2]
+            val other = if (flowFromRoot) backwardPath[1] else backwardPath[3]
+            val flow = if (flowFromRoot) {
+                min(excess[root], min(rcapFromRoot[other], -excess[other]))
+            } else {
+                -min(excess[other], min(rcapToRoot[other], -excess[root]))
+            }
+            excess[root] -= flow
+            excess[other] += flow
+            rcapFromRoot[other] -= flow
+            rcapToRoot[other] += flow
+            isResidual[eFromRoot] = rcapFromRoot[other] > 0
+            isResidual[eToRoot] = rcapToRoot[other] > 0
+        } else {
+            ++excess[backwardPath[1]]
+            --excess[backwardPath.top()]
+            var i = 2
+            while (i < backwardPath.size) {
+                val u = backwardPath[i - 1]
+                val e = backwardPath[i]
+                val v = backwardPath[i + 1]
+                val re = reverse[e]
+                if (u == root) {
+                    ++rcapFromRoot[v]
+                    --rcapToRoot[v]
+                    isResidual[e] = true
+                    if (rcapToRoot[v] == 0) isResidual[re] = false
+                } else if (v == root) {
+                    --rcapFromRoot[u]
+                    ++rcapToRoot[u]
+                    isResidual[e] = true
+                    if (rcapFromRoot[u] == 0) isResidual[re] = false
+                } else {
+                    isResidual[e] = true
+                    isResidual[re] = false
+                }
+                i += 2
+            }
+        }
+        checkInvariants()
+    }
+
+    // Return true iff u still have deficit
+    private fun pullDischarge(u: Int): Boolean {
+        if (excess[u] == 0) return false
+        val potentialU = potential[u]
+        var e = currentEdge[u]-1
+        while (++e < edgeStarts[u + 1]) {
+            val v = targets[e]
+            val rWeight = weights[e] - potentialU + potential[v]
+            if (rWeight >= 0) continue
+            val re = reverse[e]
+            if (!isResidual[re]) continue
+            if (currentEdge[v] == edgeStarts[v + 1]) continue
+            pull(u, v, e, re)
+            if (excess[u] == 0) {
+                edgeStarts[u] = e
+                if (!isResidual[re]) ++edgeStarts[u]
+                return false
+            }
+        }
+        currentEdge[u] = edgeStarts[u]
+        potential[u] += epsilon
+        checkInvariants()
+        return true
+    }
+
     private fun start() {
         initPhase()
         val path = FixedCapacityIntArrayList(rNumV * 2)
         val inPath = BooleanArray(rNumV)
         var numPhase = 0
         val stillDeficit = IntArrayList()
+        val lengths = Int2IntOpenHashMap()
+        lengths.defaultReturnValue(0)
         do {
             checkInvariants()
             epsilon = ((epsilon + params.scalingFactor - 1) / params.scalingFactor).coerceAtLeast(1)
@@ -462,49 +562,9 @@ class WeightScalingDinitz(
                             continue
                         }
                         pushCount.inc(path.size / 2)
+                        lengths.addTo(path.size / 2, 1)
                         pushed = true
-                        if (path.size == 4 && ((path[1] == root) || (path[3] == root))) {
-                            val flowFromRoot = path[3] == root
-                            val eFromRoot = if (flowFromRoot) reverse[path[2]] else path[2]
-                            val eToRoot = if (!flowFromRoot) reverse[path[2]] else path[2]
-                            val other = if (flowFromRoot) path[1] else path[3]
-                            val flow = if (flowFromRoot) {
-                                min(excess[root], min(rcapFromRoot[other], -excess[other]))
-                            } else {
-                                -min(excess[other], min(rcapToRoot[other], -excess[root]))
-                            }
-                            excess[root] -= flow
-                            excess[other] += flow
-                            rcapFromRoot[other] -= flow
-                            rcapToRoot[other] += flow
-                            isResidual[eFromRoot] = rcapFromRoot[other] > 0
-                            isResidual[eToRoot] = rcapToRoot[other] > 0
-                        } else {
-                            ++excess[deficitNode]
-                            --excess[path.top()]
-                            var i = 2
-                            while (i < path.size) {
-                                val u = path[i - 1]
-                                val e = path[i]
-                                val v = path[i + 1]
-                                val re = reverse[e]
-                                if (u == root) {
-                                    ++rcapFromRoot[v]
-                                    --rcapToRoot[v]
-                                    isResidual[e] = true
-                                    if (rcapToRoot[v] == 0) isResidual[re] = false
-                                } else if (v == root) {
-                                    --rcapFromRoot[u]
-                                    ++rcapToRoot[u]
-                                    isResidual[e] = true
-                                    if (rcapFromRoot[u] == 0) isResidual[re] = false
-                                } else {
-                                    isResidual[e] = true
-                                    isResidual[re] = false
-                                }
-                                i += 2
-                            }
-                        }
+                        pull(path)
                         checkInvariants()
                     }
                     if (stillDeficit.isEmpty) break
@@ -516,5 +576,6 @@ class WeightScalingDinitz(
                 }
             }
         } while (epsilon > 1)
+        logger.info { lengths.toString() }
     }
 }
