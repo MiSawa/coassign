@@ -1,9 +1,10 @@
 package io.github.misawa.coassign
 
+import org.junit.jupiter.api.Timeout
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.MethodSource
 
-internal class WeightScalingPRTest {
+internal class WeightScalingTest {
     companion object {
         private const val NUM_INSTANCES: Int = 10000
         private val SMALL: RandomGraph.Parameter = RandomGraph.Parameter(
@@ -42,7 +43,9 @@ internal class WeightScalingPRTest {
 
     @ParameterizedTest
     @MethodSource("generateRandomBipartiteGraph")
+    @Timeout(10)
     fun testRandomly(graph: BipartiteGraph) {
-        WeightScalingPR.run(graph)
+        val solution = WeightScaling.run(graph, params = WeightScaling.Params(checkIntermediateStatus = true))
+        solution.check()
     }
 }

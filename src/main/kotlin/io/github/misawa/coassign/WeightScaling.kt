@@ -8,7 +8,7 @@ import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap
 import mu.KLogging
 import kotlin.math.min
 
-class WeightScalingDinitz(
+class WeightScaling(
     private val graph: BipartiteGraph,
     private val params: Params,
     statsTracker: StatsTracker
@@ -48,12 +48,15 @@ class WeightScalingDinitz(
     private val rcapToRoot: FlowArray
     private val rcapFromRoot: FlowArray
 
+    private val nodeIntPropTmp: NodeToIntArray
+    private val nodeListTmp: FixedCapacityIntArrayList
+
     companion object : KLogging() {
         fun run(
             graph: BipartiteGraph,
             params: Params = Params(),
             statsTracker: StatsTracker = StatsTracker.noop()
-        ): Solution = WeightScalingDinitz(graph, params, statsTracker).run()
+        ): Solution = WeightScaling(graph, params, statsTracker).run()
     }
 
     data class Params(
@@ -128,6 +131,9 @@ class WeightScalingDinitz(
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }
         rcapFromRoot = capFromRoot.clone()
         rcapToRoot = capToRoot.clone()
+
+        nodeIntPropTmp = NodeToIntArray(rNumV)
+        nodeListTmp = FixedCapacityIntArrayList(rNumV)
     }
 
     private fun run(): Solution {
@@ -270,8 +276,8 @@ class WeightScalingDinitz(
     private fun priceRefine(): Boolean {
         priceRefineStats.timed {
             checkInvariants(epsilon * params.scalingFactor)
-            val buf = NodeToIntArray(rNumV)
-            val tsorted = FixedCapacityIntArrayList(rNumV)
+            val buf = nodeIntPropTmp
+            val tsorted = nodeListTmp
             while (tsort(tsorted, buf)) {
                 buckets.clear(0)
                 var maxBucket = 0
@@ -527,12 +533,16 @@ class WeightScalingDinitz(
                                 run onPathTip@{
                                     var e = currentEdge[u]
                                     while (e < edgeStarts[u + 1]) {
+                                        val isEdgeToRoot = u != root && e == edgeStarts[u+1] - 1
                                         val done = run onEdge@{
+                                            if (isEdgeToRoot) {
+                                                if (rcapFromRoot[u] == 0) return@onEdge false
+                                            } else if (u != root) {
+                                                if (isResidual[e]) return@onEdge false // meaning !isResidual[re]
+                                            } else if (rcapToRoot[targets[e]] == 0) return@onEdge false
                                             val v = targets[e]
                                             val rWeight = weights[e] - potentialU + potential[v]
                                             if (rWeight >= 0) return@onEdge false
-                                            val re = reverse[e]
-                                            if (!isResidual[re]) return@onEdge false
                                             if (currentEdge[v] == edgeStarts[v + 1]) return@onEdge false
                                             path.push(e)
                                             path.push(v)
