@@ -4,9 +4,7 @@ import io.github.misawa.coassign.collections.ActiveNodeQueue
 import io.github.misawa.coassign.collections.BucketsLL
 import io.github.misawa.coassign.collections.FIFOActiveNodeQueue
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
-import io.github.misawa.coassign.collections.IntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
-import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap
 import mu.KLogging
 import kotlin.math.min
 
@@ -261,9 +259,9 @@ class WeightScaling(
         checkInvariants()
     }
 
-    private val tsortDFSStack = FixedCapacityIntArrayList(rNumV)
-    private val tsortDFSFlagArray =
-        ByteArray(rNumV) // 0: Not touched yet, 1: Seen, to-be-processed, 2: Processing, 3: Processed
+    private val tsortDFSStack = FixedCapacityIntArrayList(edgeStarts[root+1])
+    // 0: Not touched yet, 1: Seen, to-be-processed, 2: Processing, 3: Processed
+    private val tsortDFSFlagArray = ByteArray(rNumV)
 
     private fun tsortDFS(result: FixedCapacityIntArrayList): Boolean {
         tsortStats.timed {
@@ -276,6 +274,7 @@ class WeightScaling(
                 tsortDFSStack.push(initialNode)
                 while (tsortDFSStack.isNotEmpty()) {
                     val u = tsortDFSStack.pop()
+                    if (tsortDFSFlagArray[u] == 3.toByte()) continue
                     if (tsortDFSFlagArray[u] == 2.toByte()) {
                         result.push(u)
                         tsortDFSFlagArray[u] = 3
@@ -290,7 +289,7 @@ class WeightScaling(
                         val rWeight = weights[e] - potentialU + potential[v]
                         if (rWeight <= 0) continue
                         if (tsortDFSFlagArray[v] == 2.toByte()) return false
-                        else if (tsortDFSFlagArray[v] == 0.toByte()) {
+                        else if (tsortDFSFlagArray[v] != 3.toByte()) {
                             tsortDFSFlagArray[v] = 1
                             tsortDFSStack.push(v)
                         }
@@ -621,9 +620,7 @@ class WeightScaling(
         val path = FixedCapacityIntArrayList(rNumV * 2)
         val inPath = BooleanArray(rNumV)
         var numPhase = 0
-        val stillDeficit = IntArrayList()
-        val lengths = Int2IntOpenHashMap()
-        lengths.defaultReturnValue(0)
+        val stillDeficit = FixedCapacityIntArrayList(rNumV)
         do {
             checkInvariants()
             epsilon = ((epsilon + params.scalingFactor - 1) / params.scalingFactor).coerceAtLeast(1)
@@ -703,7 +700,6 @@ class WeightScaling(
                             continue
                         }
                         pushCount.inc(path.size / 2)
-                        lengths.addTo(path.size / 2, 1)
                         pushed = true
                         pull(path)
                         checkInvariants()
@@ -717,6 +713,5 @@ class WeightScaling(
                 }
             }
         } while (epsilon > 1)
-        logger.info { lengths.toString() }
     }
 }
