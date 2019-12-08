@@ -1,7 +1,7 @@
 package io.github.misawa.coassign
 
 import io.github.misawa.coassign.collections.ActiveNodeQueue
-import io.github.misawa.coassign.collections.BucketsArray
+import io.github.misawa.coassign.collections.BucketsLL
 import io.github.misawa.coassign.collections.FIFOActiveNodeQueue
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
 import io.github.misawa.coassign.collections.IntArrayList
@@ -47,7 +47,7 @@ class WeightScaling(
     private val currentEdge: IntArray
     private val isResidual: BooleanArray
     private val excess: FlowArray
-    private val buckets: BucketsArray
+    private val buckets: BucketsLL
     private val deficitNodes: FixedCapacityIntArrayList
     private val capToRoot: FlowArray
     private val capFromRoot: FlowArray
@@ -139,7 +139,7 @@ class WeightScaling(
         currentEdge = IntArray(rNumV + 1)
         maxRank = (1 + params.scalingFactor) * (2 * graph.lSize + 2) + 1
         logger.info { "max rank = $maxRank" }
-        buckets = BucketsArray(maxRank, rNumV)
+        buckets = BucketsLL(maxRank, rNumV)
         deficitNodes = FixedCapacityIntArrayList(rNumV)
         capFromRoot = FlowArray(graph.numV) { if (it < graph.lSize) graph.multiplicities[it] else 0 }
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }
