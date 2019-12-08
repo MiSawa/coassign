@@ -54,8 +54,6 @@ class WeightScaling(
     private val rcapToRoot: FlowArray
     private val rcapFromRoot: FlowArray
 
-    private val nodeIntPropTmp: NodeToIntArray
-    private val nodeListTmp: FixedCapacityIntArrayList
     private val activeNodes: ActiveNodeQueue
     private var relabelCount: Int = 0
 
@@ -70,8 +68,14 @@ class WeightScaling(
     data class Params(
         val scalingFactor: Weight = 8,
         val checkIntermediateStatus: Boolean = false,
-        val globalRelabelFreqFactor: Double = 0.6
+        val globalRelabelFreqFactor: Double = 0.6,
+        val strategy: Strategy = Strategy.DINITZ
     ) {
+        enum class Strategy {
+            DINITZ,
+            PUSH_RELABEL,
+        }
+
         init {
             check(scalingFactor > 1) { "Scaling factor should be greater than 1 but was $scalingFactor" }
         }
@@ -141,9 +145,6 @@ class WeightScaling(
         capToRoot = FlowArray(graph.numV) { if (it >= graph.lSize) graph.multiplicities[it] else 0 }
         rcapFromRoot = capFromRoot.clone()
         rcapToRoot = capToRoot.clone()
-
-        nodeIntPropTmp = NodeToIntArray(rNumV)
-        nodeListTmp = FixedCapacityIntArrayList(rNumV)
         activeNodes = FIFOActiveNodeQueue(rNumV)
     }
 
@@ -152,7 +153,10 @@ class WeightScaling(
 
         epsilon = weights.max() ?: 1
         potential.fill(0)
-        startDinitz()
+        when (params.strategy) {
+            Params.Strategy.DINITZ -> startDinitz()
+            Params.Strategy.PUSH_RELABEL -> startPR()
+        }.let {} // for exhaustiveness
 
         for (u in allNodes) potential[u] -= potential[root]
         for (u in allNodes) potential[u] =
@@ -257,39 +261,53 @@ class WeightScaling(
         checkInvariants()
     }
 
-    private fun tsort(result: FixedCapacityIntArrayList, deg: NodeToIntArray): Boolean {
+    private val tsortDFSStack = FixedCapacityIntArrayList(rNumV)
+    private val tsortDFSFlagArray =
+        ByteArray(rNumV) // 0: Not touched yet, 1: Seen, to-be-processed, 2: Processing, 3: Processed
+
+    private fun tsortDFS(result: FixedCapacityIntArrayList): Boolean {
         tsortStats.timed {
             result.clear()
-            deg.fill(0)
-            for (u in allNodes) {
-                val potentialU = potential[u]
-                for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                    if (!isResidual[e]) continue
-                    val v = targets[e]
-                    val rWeight = weights[e] - potentialU + potential[v]
-                    if (rWeight > 0) ++deg[v]
+            tsortDFSStack.clear()
+            tsortDFSFlagArray.fill(0)
+            for (initialNode in allNodes) {
+                if (tsortDFSFlagArray[initialNode] != 0.toByte()) continue
+                tsortDFSFlagArray[initialNode] = 1
+                tsortDFSStack.push(initialNode)
+                while (tsortDFSStack.isNotEmpty()) {
+                    val u = tsortDFSStack.pop()
+                    if (tsortDFSFlagArray[u] == 2.toByte()) {
+                        result.push(u)
+                        tsortDFSFlagArray[u] = 3
+                        continue
+                    }
+                    tsortDFSFlagArray[u] = 2
+                    tsortDFSStack.push(u)
+                    val potentialU = potential[u]
+                    for (e in edgeStarts[u] until edgeStarts[u + 1]) {
+                        if (!isResidual[e]) continue
+                        val v = targets[e]
+                        val rWeight = weights[e] - potentialU + potential[v]
+                        if (rWeight <= 0) continue
+                        if (tsortDFSFlagArray[v] == 2.toByte()) return false
+                        else if (tsortDFSFlagArray[v] == 0.toByte()) {
+                            tsortDFSFlagArray[v] = 1
+                            tsortDFSStack.push(v)
+                        }
+                    }
                 }
             }
-            for (u in allNodes) if (deg[u] == 0) result.push(u)
-            for (u in result) {
-                val potentialU = potential[u]
-                for (e in edgeStarts[u] until edgeStarts[u + 1]) {
-                    if (!isResidual[e]) continue
-                    val v = targets[e]
-                    val rWeight = weights[e] - potentialU + potential[v]
-                    if (rWeight > 0) if (--deg[v] == 0) result.push(v)
-                }
-            }
-            return result.size == rNumV
+            result.reverse()
+            return true
         }
     }
 
+    private val priceRefineTSortedNodes = FixedCapacityIntArrayList(rNumV)
     private fun priceRefine(): Boolean {
         priceRefineStats.timed {
             checkInvariants(epsilon * params.scalingFactor)
-            val buf = nodeIntPropTmp
-            val tsorted = nodeListTmp
-            while (tsort(tsorted, buf)) {
+            val tsorted = priceRefineTSortedNodes
+            while (tsortDFS(tsorted)) {
                 buckets.clear(0)
                 var maxBucket = 0
                 for (u in tsorted) {
@@ -646,7 +664,7 @@ class WeightScaling(
                                 run onPathTip@{
                                     var e = currentEdge[u]
                                     while (e < edgeStarts[u + 1]) {
-                                        val isEdgeToRoot = u != root && e == edgeStarts[u+1] - 1
+                                        val isEdgeToRoot = u != root && e == edgeStarts[u + 1] - 1
                                         val done = run onEdge@{
                                             if (isEdgeToRoot) {
                                                 if (rcapFromRoot[u] == 0) return@onEdge false

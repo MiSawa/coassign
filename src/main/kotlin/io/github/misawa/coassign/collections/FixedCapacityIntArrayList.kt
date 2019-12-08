@@ -30,6 +30,17 @@ class FixedCapacityIntArrayList(maxCapacity: Int) {
         while (it.hasNext()) push(it.nextInt())
     }
 
+    fun reverse() {
+        var i = 0
+        var j = size - 1
+        while (i < j) {
+            val tmp = arr[i]
+            arr[i] = arr[j]
+            arr[j] = tmp
+            ++i
+            --j
+        }
+    }
     fun push(element: Int) {
         arr[currentSize++] = element
     }
