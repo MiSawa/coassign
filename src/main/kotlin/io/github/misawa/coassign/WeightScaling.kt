@@ -1,6 +1,8 @@
 package io.github.misawa.coassign
 
+import io.github.misawa.coassign.collections.ActiveNodeQueue
 import io.github.misawa.coassign.collections.BucketsArray
+import io.github.misawa.coassign.collections.FIFOActiveNodeQueue
 import io.github.misawa.coassign.collections.FixedCapacityIntArrayList
 import io.github.misawa.coassign.collections.IntArrayList
 import io.github.misawa.coassign.utils.StatsTracker
@@ -18,6 +20,8 @@ class WeightScaling(
     private val tsortStats = statsTracker.timer("TSort")
     private val priceRefineStats = statsTracker.timer("PriceRefine")
     private val pushCount = statsTracker.counter("Push")
+    private val dischargeStats = statsTracker.timer("Discharge")
+    private val augRelabelNonVCStats = statsTracker.timer("DischargeNonVC")
 
     private val initialScale: LargeWeight
 
@@ -35,6 +39,8 @@ class WeightScaling(
     private val rightNodes: NodeRange
     private val allEdges: EdgeRange
 
+    private val inVertexCover: BooleanArray
+
     private val maxRank: Int
     private var epsilon: LargeWeight
     private val potential: LargeWeightArray
@@ -50,6 +56,8 @@ class WeightScaling(
 
     private val nodeIntPropTmp: NodeToIntArray
     private val nodeListTmp: FixedCapacityIntArrayList
+    private val activeNodes: ActiveNodeQueue
+    private var relabelCount: Int = 0
 
     companion object : KLogging() {
         fun run(
@@ -61,7 +69,8 @@ class WeightScaling(
 
     data class Params(
         val scalingFactor: Weight = 8,
-        val checkIntermediateStatus: Boolean = false
+        val checkIntermediateStatus: Boolean = false,
+        val globalRelabelFreqFactor: Double = 0.6
     ) {
         init {
             check(scalingFactor > 1) { "Scaling factor should be greater than 1 but was $scalingFactor" }
@@ -118,6 +127,7 @@ class WeightScaling(
             targets[re] = u
             reverse[re] = e
         }
+        inVertexCover = BooleanArray(rNumV) { (it == root) || ((it < graph.lSize) == (graph.lSize <= graph.rSize)) }
         epsilon = weights.max() ?: initialScale
         isResidual = BooleanArray(rNumE)
         excess = FlowArray(rNumV)
@@ -134,6 +144,7 @@ class WeightScaling(
 
         nodeIntPropTmp = NodeToIntArray(rNumV)
         nodeListTmp = FixedCapacityIntArrayList(rNumV)
+        activeNodes = FIFOActiveNodeQueue(rNumV)
     }
 
     private fun run(): Solution {
@@ -141,7 +152,7 @@ class WeightScaling(
 
         epsilon = weights.max() ?: 1
         potential.fill(0)
-        start()
+        startDinitz()
 
         for (u in allNodes) potential[u] -= potential[root]
         for (u in allNodes) potential[u] =
@@ -388,32 +399,6 @@ class WeightScaling(
         }
     }
 
-    private fun pull(u: Int, v: Int, e: Int, re: Int) {
-        if ((u == root) || (v == root)) {
-            val flowFromRoot = v == root
-            val eFromRoot = if (flowFromRoot) re else e
-            val eToRoot = if (!flowFromRoot) re else e
-            val nonRoot = if (flowFromRoot) u else v
-            val flow = if (flowFromRoot) {
-                min(excess[root], min(rcapFromRoot[nonRoot], -excess[nonRoot]))
-            } else {
-                -min(excess[nonRoot], min(rcapToRoot[nonRoot], -excess[root]))
-            }
-            excess[root] -= flow
-            excess[nonRoot] += flow
-            rcapFromRoot[nonRoot] -= flow
-            rcapToRoot[nonRoot] += flow
-            isResidual[eFromRoot] = rcapFromRoot[nonRoot] > 0
-            isResidual[eToRoot] = rcapToRoot[nonRoot] > 0
-        } else {
-            ++excess[u]
-            --excess[v]
-            isResidual[e] = true
-            isResidual[re] = false
-        }
-        checkInvariants()
-    }
-
     private fun pull(backwardPath: FixedCapacityIntArrayList) {
         if (backwardPath.size == 4 && ((backwardPath[1] == root) || (backwardPath[3] == root))) {
             val flowFromRoot = backwardPath[3] == root
@@ -460,32 +445,160 @@ class WeightScaling(
         checkInvariants()
     }
 
-    // Return true iff u still have deficit
-    private fun pullDischarge(u: Int): Boolean {
-        if (excess[u] == 0) return false
-        val potentialU = potential[u]
-        var e = currentEdge[u]-1
-        while (++e < edgeStarts[u + 1]) {
-            val v = targets[e]
-            val rWeight = weights[e] - potentialU + potential[v]
-            if (rWeight >= 0) continue
-            val re = reverse[e]
-            if (!isResidual[re]) continue
-            if (currentEdge[v] == edgeStarts[v + 1]) continue
-            pull(u, v, e, re)
-            if (excess[u] == 0) {
-                edgeStarts[u] = e
-                if (!isResidual[re]) ++edgeStarts[u]
-                return false
-            }
-        }
+    private fun revRelabel(u: Int) {
+        ++relabelCount
         currentEdge[u] = edgeStarts[u]
         potential[u] += epsilon
         checkInvariants()
-        return true
     }
 
-    private fun start() {
+    private fun pullAugRelabelNonVC(u: Int, potentialU: LargeWeight, extraDeficit: Flow): Flow {
+        augRelabelNonVCStats.timed {
+            check(!inVertexCover[u])
+            if (excess[u] >= extraDeficit) {
+                return extraDeficit
+            }
+            var e = currentEdge[u] - 1
+            val edgeToRoot = edgeStarts[u + 1] - 1
+            while (++e < edgeToRoot) {
+                if (isResidual[e]) continue // means !isResidual[re]
+                val v = targets[e]
+                val rWeight = weights[e] - potentialU + potential[v]
+                if (rWeight >= 0) continue
+                if (excess[v] == 0) activeNodes.push(v)
+                ++excess[u]
+                --excess[v]
+                isResidual[e] = true
+                isResidual[reverse[e]] = false
+                if (excess[u] == extraDeficit) {
+                    currentEdge[u] = e + 1
+                    return extraDeficit
+                }
+            }
+            if (potential[root] < potentialU) {
+                val f = minOf(extraDeficit - excess[u], rcapFromRoot[u])
+                excess[u] += f
+                excess[root] -= f
+                rcapFromRoot[u] -= f
+                rcapToRoot[u] += f
+                isResidual[edgeToRoot] = true
+                isResidual[reverse[edgeToRoot]] = rcapFromRoot[u] > 0
+                if (excess[root] < 0) activeNodes.push(root)
+            }
+            if (excess[u] < extraDeficit) {
+                revRelabel(u)
+                return maxOf(0, excess[u])
+            } else {
+                currentEdge[u] = edgeToRoot
+                return extraDeficit
+            }
+        }
+    }
+
+    // Return true iff u still is a deficit node
+    private fun pullDischarge(u: Int): Boolean {
+        dischargeStats.timed {
+            checkInvariants()
+            if (excess[u] >= 0) return false
+            val potentialU = potential[u]
+            if (u == root) {
+                var v = (currentEdge[root] - edgeStarts[root]) - 1
+                while (++v < root) {
+                    if (rcapToRoot[v] == 0) continue
+                    val potentialV = potential[v]
+                    if (potentialV >= potentialU) continue
+                    if (currentEdge[v] == edgeStarts[v + 1]) continue
+                    var f = minOf(-excess[root], rcapToRoot[v])
+                    if (!inVertexCover[v]) f = pullAugRelabelNonVC(v, potentialV, minOf(-excess[root], rcapToRoot[v]))
+                    if (f == 0) continue
+                    excess[root] += f
+                    excess[v] -= f
+                    if (excess[v] < 0) activeNodes.push(v)
+                    rcapToRoot[v] -= f
+                    rcapFromRoot[v] += f
+                    val e = edgeStarts[root] + v
+                    isResidual[e] = true
+                    isResidual[reverse[e]] = rcapToRoot[v] > 0
+                    checkInvariants()
+                    if (excess[root] == 0) {
+                        currentEdge[root] = edgeStarts[root] + v
+                        return false
+                    }
+                }
+                revRelabel(root)
+                return true
+            } else {
+                var e = currentEdge[u] - 1
+                val edgeToRoot = edgeStarts[u + 1] - 1
+                while (++e < edgeToRoot) {
+                    if (isResidual[e]) continue // meaning !isResidual[re]
+                    val v = targets[e]
+                    val potentialV = potential[v]
+                    val rWeight = weights[e] - potentialU + potentialV
+                    if (rWeight >= 0) continue
+                    if (!inVertexCover[v] && pullAugRelabelNonVC(v, potentialV, 1) == 0) continue
+                    if (excess[v] == 0) activeNodes.push(v)
+                    ++excess[u]
+                    --excess[v]
+                    isResidual[e] = true
+                    isResidual[reverse[e]] = false
+                    checkInvariants()
+                    if (excess[u] == 0) {
+                        currentEdge[u] = e + 1
+                        return false
+                    }
+                }
+                currentEdge[u] = edgeToRoot
+                if (rcapFromRoot[u] > 0 && potential[root] < potentialU) {
+                    val f = minOf(-excess[u], rcapFromRoot[u])
+                    excess[u] += f
+                    excess[root] -= f
+                    rcapFromRoot[u] -= f
+                    rcapToRoot[u] += f
+                    isResidual[edgeStarts[root] + u] = rcapFromRoot[u] > 0
+                    isResidual[edgeToRoot] = true
+                    if (excess[root] < 0) activeNodes.push(root)
+                    checkInvariants()
+                }
+                if (excess[u] == 0) return false
+                revRelabel(u)
+                checkInvariants()
+                return true
+            }
+        }
+    }
+
+    private fun startPR() {
+        initPhase()
+        var numPhase = 0
+        val globalRelabelFreq = (rNumV * params.globalRelabelFreqFactor).toInt()
+        var nextGlobalRelabel: Int
+        do {
+            checkInvariants()
+            epsilon = ((epsilon + params.scalingFactor - 1) / params.scalingFactor).coerceAtLeast(1)
+            logger.trace { "Phase $epsilon" }
+            ++numPhase
+            if (numPhase > 1 && priceRefine()) continue
+            initPhase()
+            checkInvariants()
+            while (true) {
+                if (!adjustPotential()) break
+                nextGlobalRelabel = relabelCount + globalRelabelFreq
+                for (u in allNodes) if (!inVertexCover[u] && excess[u] < 0) while (pullDischarge(u));
+                activeNodes.clear()
+                for (u in allNodes) if (excess[u] < 0) activeNodes.push(u)
+                while (activeNodes.isNotEmpty()) {
+                    val u = activeNodes.pop()
+                    if (excess[u] >= 0) continue
+                    pullDischarge(u)
+                    if (excess[u] < 0) activeNodes.push(u)
+                    if (relabelCount > nextGlobalRelabel) break
+                }
+            }
+        } while (epsilon > 1)
+    }
+
+    private fun startDinitz() {
         initPhase()
         val path = FixedCapacityIntArrayList(rNumV * 2)
         val inPath = BooleanArray(rNumV)
